@@ -1,12 +1,16 @@
 node_modules/
 *.apk
 *.zip
-*.png
 *.log
 android/app/build/
 android/.gradle/
 android/build/
+build/
+DerivedData/
 ios/App/App.xcodeproj/xcuserdata/
 ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
 .DS_Store
 Thumbs.db
+restore.sql
+restore_data.js
+restore_sync.js

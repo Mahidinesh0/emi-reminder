@@ -1,0 +1,8 @@
+name = "emi-reminder"
+compatibility_date = "2026-10-26"
+pages_build_output_dir = "www"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "emi-reminder-db"
+database_id = "d9ba7c50-b2e4-429a-8b7f-b22445168409"

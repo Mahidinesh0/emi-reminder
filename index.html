@@ -6,15 +6,505 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="EMI Reminder">
+  <meta name="format-detection" content="telephone=no">
   <title>EMI Reminder</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.png">
   <meta name="theme-color" content="#4f46e5">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261028_fix_v2">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ================= NEON AUTH GATE STYLES (MATCHING USER PHOTO) ================= */
+    .login-view-screen {
+      background: #070a14 !important;
+      background-image: 
+        radial-gradient(circle at 10% 90%, rgba(56, 189, 248, 0.22) 0%, transparent 45%),
+        radial-gradient(circle at 90% 90%, rgba(168, 85, 247, 0.22) 0%, transparent 45%),
+        radial-gradient(circle at 50% 12%, rgba(99, 102, 241, 0.15) 0%, transparent 40%) !important;
+      position: relative !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      overflow-x: hidden !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      padding: calc(30px + env(safe-area-inset-top, 0px)) 20px calc(30px + env(safe-area-inset-bottom, 0px)) !important;
+      min-height: 100% !important;
+      height: 100% !important;
+      box-sizing: border-box !important;
+      display: none;
+      flex-direction: column !important;
+    }
+    .login-view-screen.active {
+      display: flex !important;
+    }
+
+    .login-bg-glow {
+      position: absolute;
+      pointer-events: none;
+      border-radius: 50%;
+      filter: blur(80px);
+      z-index: 1;
+    }
+    .login-bg-glow.glow-left {
+      width: 260px;
+      height: 260px;
+      bottom: -40px;
+      left: -60px;
+      background: rgba(56, 189, 248, 0.22);
+    }
+    .login-bg-glow.glow-right {
+      width: 260px;
+      height: 260px;
+      bottom: -40px;
+      right: -60px;
+      background: rgba(168, 85, 247, 0.22);
+    }
+
+    .login-wrapper {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: auto;
+    }
+
+    body.mode-fullscreen .login-wrapper {
+      max-width: 800px;
+    }
+
+    /* Brand Header */
+    .login-brand-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .neon-calendar-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.45)) drop-shadow(0 0 30px rgba(192, 132, 252, 0.25));
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .neon-calendar-logo:hover {
+      transform: scale(1.06);
+    }
+
+    .neon-brand-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+    .brand-word-emi {
+      font-size: 1.85rem;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+    .brand-word-reminder {
+      font-size: 1.85rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.4));
+      letter-spacing: -0.5px;
+    }
+
+    .neon-brand-tagline {
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: #94a3b8;
+      letter-spacing: 0.6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tagline-dot {
+      color: #38bdf8;
+      font-size: 0.9rem;
+    }
+
+    /* Welcome Back Heading */
+    .welcome-heading-group {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .welcome-heading {
+      font-size: 1.65rem;
+      font-weight: 800;
+      color: #ffffff;
+      margin: 0;
+      letter-spacing: -0.5px;
+    }
+    .welcome-accent {
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.5));
+    }
+    .welcome-sub {
+      font-size: 0.85rem;
+      color: #94a3b8;
+      margin: 6px 0 0 0;
+    }
+
+    /* ================= PROFILES CONTAINER (RESPONSIVE) ================= */
+
+    /* MOBILE VIEW (Default & inside mobile frame) */
+    .login-profiles-container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      width: 100%;
+      max-width: 330px;
+      margin-bottom: 20px;
+    }
+
+    .profile-card {
+      width: 100%;
+      height: 82px;
+      border-radius: 20px;
+      padding: 0 18px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .profile-card:active {
+      transform: scale(0.97);
+    }
+
+    .profile-avatar-wrap {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #ffffff;
+      flex-shrink: 0;
+    }
+
+    .profile-card-name {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-left: 16px;
+      flex: 1;
+      text-align: left;
+      letter-spacing: -0.3px;
+    }
+
+    .profile-arrow-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      font-size: 0.95rem;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+
+    /* DESKTOP FULLSCREEN VIEW (Side-by-side squircle cards matching Photo Left) */
+    body.mode-fullscreen .login-profiles-container {
+      flex-direction: row;
+      justify-content: center;
+      align-items: center;
+      gap: 30px;
+      max-width: 800px;
+      margin-bottom: 28px;
+    }
+
+    body.mode-fullscreen .profile-card {
+      width: 195px;
+      height: 220px;
+      border-radius: 26px;
+      padding: 24px 16px 20px 16px;
+      flex-direction: column;
+      justify-content: space-between;
+      text-align: center;
+    }
+
+    body.mode-fullscreen .profile-avatar-wrap {
+      width: 68px;
+      height: 68px;
+      font-size: 1.8rem;
+      margin-top: 4px;
+    }
+
+    body.mode-fullscreen .profile-card-name {
+      font-size: 1.25rem;
+      margin: 10px 0 0 0;
+      flex: none;
+      text-align: center;
+    }
+
+    body.mode-fullscreen .profile-arrow-btn {
+      width: 44px;
+      height: 44px;
+      font-size: 1.05rem;
+      margin-top: auto;
+    }
+
+    /* Profile Card Colors & Neon Glows */
+    .profile-card.theme-blue {
+      background: linear-gradient(180deg, rgba(10, 22, 48, 0.82) 0%, rgba(6, 32, 74, 0.88) 100%) !important;
+      border: 1.5px solid #0099ff !important;
+      box-shadow: 0 0 24px rgba(0, 153, 255, 0.32), inset 0 0 16px rgba(0, 153, 255, 0.12) !important;
+    }
+    .profile-card.theme-blue:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 0 38px rgba(0, 153, 255, 0.55), inset 0 0 22px rgba(0, 153, 255, 0.2) !important;
+    }
+    .profile-card.theme-blue .profile-avatar-wrap {
+      background: #0284c7 !important;
+      box-shadow: 0 0 16px rgba(2, 132, 199, 0.55) !important;
+    }
+    .profile-card.theme-blue:hover .profile-arrow-btn {
+      background: #0099ff !important;
+      border-color: #0099ff !important;
+      box-shadow: 0 0 12px rgba(0, 153, 255, 0.6) !important;
+    }
+
+    .profile-card.theme-purple {
+      background: linear-gradient(180deg, rgba(22, 12, 44, 0.82) 0%, rgba(42, 14, 76, 0.88) 100%) !important;
+      border: 1.5px solid #a855f7 !important;
+      box-shadow: 0 0 24px rgba(168, 85, 247, 0.32), inset 0 0 16px rgba(168, 85, 247, 0.12) !important;
+    }
+    .profile-card.theme-purple:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 0 38px rgba(168, 85, 247, 0.55), inset 0 0 22px rgba(168, 85, 247, 0.2) !important;
+    }
+    .profile-card.theme-purple .profile-avatar-wrap {
+      background: #9333ea !important;
+      box-shadow: 0 0 16px rgba(147, 51, 234, 0.55) !important;
+    }
+    .profile-card.theme-purple:hover .profile-arrow-btn {
+      background: #a855f7 !important;
+      border-color: #a855f7 !important;
+      box-shadow: 0 0 12px rgba(168, 85, 247, 0.6) !important;
+    }
+
+    .profile-card.theme-emerald {
+      background: linear-gradient(180deg, rgba(8, 28, 20, 0.82) 0%, rgba(6, 44, 30, 0.88) 100%) !important;
+      border: 1.5px solid #10b981 !important;
+      box-shadow: 0 0 24px rgba(16, 185, 129, 0.32), inset 0 0 16px rgba(16, 185, 129, 0.12) !important;
+    }
+    .profile-card.theme-emerald .profile-avatar-wrap {
+      background: #059669 !important;
+    }
+    .profile-card.theme-emerald:hover .profile-arrow-btn {
+      background: #10b981 !important;
+      border-color: #10b981 !important;
+    }
+
+    .profile-card.theme-sunset {
+      background: linear-gradient(180deg, rgba(32, 10, 20, 0.82) 0%, rgba(56, 12, 32, 0.88) 100%) !important;
+      border: 1.5px solid #f43f5e !important;
+      box-shadow: 0 0 24px rgba(244, 63, 94, 0.32), inset 0 0 16px rgba(244, 63, 94, 0.12) !important;
+    }
+    .profile-card.theme-sunset .profile-avatar-wrap {
+      background: #e11d48 !important;
+    }
+    .profile-card.theme-sunset:hover .profile-arrow-btn {
+      background: #f43f5e !important;
+      border-color: #f43f5e !important;
+    }
+
+    .profile-card.theme-amber {
+      background: linear-gradient(180deg, rgba(32, 22, 10, 0.82) 0%, rgba(54, 34, 10, 0.88) 100%) !important;
+      border: 1.5px solid #f59e0b !important;
+      box-shadow: 0 0 24px rgba(245, 158, 11, 0.32), inset 0 0 16px rgba(245, 158, 11, 0.12) !important;
+    }
+    .profile-card.theme-amber .profile-avatar-wrap {
+      background: #d97706 !important;
+    }
+    .profile-card.theme-amber:hover .profile-arrow-btn {
+      background: #f59e0b !important;
+      border-color: #f59e0b !important;
+    }
+
+    /* Bottom Actions */
+    .login-bottom-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .add-profile-ghost-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px dashed rgba(255, 255, 255, 0.22);
+      border-radius: 20px;
+      padding: 8px 20px;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: inherit;
+      transition: all 0.2s ease;
+    }
+    .add-profile-ghost-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: #38bdf8;
+      color: #ffffff;
+      box-shadow: 0 0 15px rgba(56, 189, 248, 0.25);
+    }
+
+    /* Modals Overlay */
+    .create-profile-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      height: -webkit-fill-available;
+      background: rgba(4, 8, 20, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px)) 20px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      box-sizing: border-box;
+    }
+    .create-profile-modal-card {
+      width: 100%;
+      max-width: 340px;
+      background: #0f1629;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(56, 189, 248, 0.2);
+      border-radius: 22px;
+      padding: 22px 20px;
+    }
+    .create-profile-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .create-profile-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin: 0;
+    }
+    .create-profile-close-btn {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      font-size: 1.1rem;
+      cursor: pointer;
+    }
+    .form-group-login {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .login-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+    .login-input-box {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .login-input-icon {
+      position: absolute;
+      left: 12px;
+      color: #64748b;
+      font-size: 0.85rem;
+    }
+    .login-input-box input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 10px 14px 10px 36px;
+      color: #f8fafc;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+    }
+    .login-input-box input:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+    }
+    .avatar-color-picker {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .color-dot-opt {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: transform 0.15s;
+    }
+    .color-dot-opt.selected {
+      border-color: #ffffff;
+      transform: scale(1.18);
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+    }
+    .login-submit-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      border: none;
+      border-radius: 12px;
+      padding: 12px;
+      color: #fff;
+      font-size: 0.92rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 16px rgba(2, 132, 199, 0.4);
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    .login-submit-btn:hover {
+      box-shadow: 0 6px 22px rgba(56, 189, 248, 0.5);
+      transform: translateY(-1px);
+    }
+    .login-error-text {
+      color: #fb7185;
+      font-size: 0.78rem;
+    }
+  </style>
 </head>
 <body class="theme-indigo">
   <div class="desktop-wrapper">
@@ -38,8 +528,141 @@
     <div class="device-frame" id="deviceFrame">
       <div class="app-viewport">
 
+        <!-- ================= LOGIN / AUTH GATE SCREEN ================= -->
+        <section class="view-screen active login-view-screen" id="loginScreen">
+          <!-- Background Ambient Glow Accents -->
+          <div class="login-bg-glow glow-left"></div>
+          <div class="login-bg-glow glow-right"></div>
+          
+          <div class="login-wrapper">
+            
+            <!-- Neon Glowing App Brand Banner (Matching Photo) -->
+            <div class="login-brand-header">
+              <div class="neon-calendar-logo">
+                <svg width="68" height="68" viewBox="0 0 68 68" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="logoBorderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#38bdf8" />
+                      <stop offset="50%" stop-color="#818cf8" />
+                      <stop offset="100%" stop-color="#c084fc" />
+                    </linearGradient>
+                    <linearGradient id="logoBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#0a1226" />
+                      <stop offset="100%" stop-color="#181338" />
+                    </linearGradient>
+                  </defs>
+                  <rect x="4" y="4" width="60" height="60" rx="18" fill="url(#logoBgGrad)" stroke="url(#logoBorderGrad)" stroke-width="2.5" />
+                  <!-- Calendar Rings -->
+                  <rect x="20" y="8" width="5" height="9" rx="2.5" fill="#38bdf8" />
+                  <rect x="43" y="8" width="5" height="9" rx="2.5" fill="#c084fc" />
+                  <!-- Calendar Header bar -->
+                  <line x1="15" y1="23" x2="53" y2="23" stroke="rgba(255,255,255,0.2)" stroke-width="2" stroke-linecap="round" />
+                  <!-- Rupee Symbol in Center -->
+                  <text x="34" y="46" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="22" font-weight="800" fill="#38bdf8" text-anchor="middle">₹</text>
+                </svg>
+              </div>
+
+              <div class="neon-brand-title">
+                <span class="brand-word-emi">EMI</span>
+                <span class="brand-word-reminder">Reminder</span>
+              </div>
+              <div class="neon-brand-tagline">
+                <span>Track</span> <span class="tagline-dot">•</span> <span>Manage</span> <span class="tagline-dot">•</span> <span>Never Miss a Payment</span>
+              </div>
+            </div>
+
+            <!-- Welcome Back Heading -->
+            <div class="welcome-heading-group">
+              <h2 class="welcome-heading">Welcome <span class="welcome-accent">Back</span></h2>
+              <p class="welcome-sub">Choose your profile to continue</p>
+            </div>
+
+            <!-- Profiles Container (Side-by-side on Fullscreen, Stacked Pills on Mobile) -->
+            <div class="login-profiles-container" id="loginProfilesContainer">
+              <!-- Dynamically populated profile cards (Ben, Mahi, etc.) -->
+            </div>
+
+            <!-- Add Profile Action -->
+            <div class="login-bottom-actions">
+              <button type="button" class="add-profile-ghost-btn" id="openCreateProfileBtn">
+                <i class="fa-solid fa-plus"></i>
+                <span>Add Profile</span>
+              </button>
+            </div>
+
+            <!-- Create Profile Modal / Expandable Card -->
+            <div class="create-profile-overlay" id="createProfileOverlay" style="display: none;">
+              <div class="create-profile-modal-card">
+                <div class="create-profile-header">
+                  <h3 class="create-profile-title">New Profile</h3>
+                  <button type="button" class="create-profile-close-btn" id="closeCreateProfileBtn">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <div class="form-group-login" style="margin-top: 14px;">
+                  <label class="login-label">Name</label>
+                  <div class="login-input-box">
+                    <i class="fa-solid fa-user login-input-icon"></i>
+                    <input type="text" id="signupUsernameInput" placeholder="Enter name (e.g. Ben, Mahi)..." maxlength="20">
+                  </div>
+                </div>
+
+                <div class="form-group-login" style="margin-top: 12px;">
+                  <label class="login-label">Password <span style="font-size:0.75rem; color:#f43f5e; font-weight:700;">(Required)</span></label>
+                  <div class="login-input-box">
+                    <i class="fa-solid fa-lock login-input-icon"></i>
+                    <input type="password" id="signupPinInput" placeholder="Create a password (required)" maxlength="30" autocomplete="new-password">
+                  </div>
+                </div>
+
+                <div class="form-group-login" style="margin-top: 12px;">
+                  <label class="login-label">Avatar Color</label>
+                  <div class="avatar-color-picker" id="signupColorPicker" style="margin-top: 6px;">
+                    <div class="color-dot-opt selected" data-color="#0284c7" data-theme="theme-blue" style="background: #0284c7;"></div>
+                    <div class="color-dot-opt" data-color="#9333ea" data-theme="theme-purple" style="background: #9333ea;"></div>
+                    <div class="color-dot-opt" data-color="#059669" data-theme="theme-emerald" style="background: #059669;"></div>
+                    <div class="color-dot-opt" data-color="#e11d48" data-theme="theme-sunset" style="background: #e11d48;"></div>
+                    <div class="color-dot-opt" data-color="#d97706" data-theme="theme-amber" style="background: #d97706;"></div>
+                  </div>
+                </div>
+
+                <span class="login-error-text" id="signupErrorText" style="display: none; margin-top: 8px;">Name is required</span>
+
+                <button class="login-submit-btn" id="submitSignUpBtn" type="button" style="margin-top: 18px;">
+                  <span>Create & Enter</span>
+                  <i class="fa-solid fa-arrow-right"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Password Unlock Modal -->
+            <div class="create-profile-overlay" id="loginPinPromptOverlay" style="display: none;">
+              <div class="create-profile-modal-card" style="max-width: 310px; text-align: center;">
+                <div class="create-profile-header" style="justify-content: center; position: relative;">
+                  <h3 class="create-profile-title" id="pinPromptTitle">Enter Password</h3>
+                  <button type="button" class="create-profile-close-btn" id="closePinPromptBtn" style="position: absolute; right: 0;">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+                <p style="font-size: 0.84rem; color: #94a3b8; margin: 8px 0 14px 0;" id="pinPromptSubtitle">This profile is password protected.</p>
+                <div class="login-input-box">
+                  <i class="fa-solid fa-lock login-input-icon"></i>
+                  <input type="password" id="cardPinInput" placeholder="Enter password..." style="text-align: center; font-size: 1.15rem;" maxlength="30" autocomplete="current-password">
+                </div>
+                <span class="login-error-text" id="cardPinErrorText" style="display: none; margin-top: 6px;">Incorrect password</span>
+                <button class="login-submit-btn" id="submitCardPinBtn" type="button" style="margin-top: 16px;">
+                  <span>Unlock Profile</span>
+                  <i class="fa-solid fa-lock-open"></i>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
         <!-- ================= MAIN TASKS VIEW ================= -->
-        <main class="view-screen active" id="tasksScreen">
+        <main class="view-screen" id="tasksScreen">
           <!-- Top App Bar -->
           <header class="app-bar">
             <button class="icon-btn" id="openDrawerBtn" aria-label="Open Menu">
@@ -49,9 +672,18 @@
               <h1 class="app-title">Tasks</h1>
               <span class="app-subtitle" id="currentListSubtitle">All Lists</span>
             </div>
-            <button class="icon-btn" id="toggleSearchBtn" aria-label="Search">
-              <i class="fa-solid fa-magnifying-glass"></i>
-            </button>
+            <div class="app-bar-actions" style="display: flex; align-items: center; gap: 8px;">
+              <button class="user-pill-btn" id="topUserBtn" aria-label="Switch User" title="User Profile & Accounts">
+                <div class="user-pill-avatar" id="topUserAvatar"><span id="topUserInitial">U</span></div>
+                <span class="user-pill-name" id="topUserName">User</span>
+              </button>
+              <button class="icon-btn sync-indicator-btn synced" id="cloudSyncStatusBtn" aria-label="Cloud Sync Status" title="Cloud DB Connected (Click to sync now)">
+                <i class="fa-solid fa-cloud-check" id="syncStatusIcon"></i>
+              </button>
+              <button class="icon-btn" id="toggleSearchBtn" aria-label="Search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+              </button>
+            </div>
           </header>
 
           <!-- Search Bar (Collapsible) -->
@@ -129,40 +761,40 @@
             <!-- Section 2: Notification (matching user screenshot 53b22bc6) -->
             <div class="form-section-title">Notification</div>
             <div class="form-card notification-card-splend">
-              <!-- Hidden native pickers -->
-              <input type="date" id="hiddenDateInput" style="position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0;">
-              <input type="time" id="hiddenTimeInput" style="position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0;">
-
               <!-- Date Row -->
-              <div class="notif-row" id="datePickerRow">
+              <div class="notif-row notif-picker-row-relative" id="datePickerRow">
                 <div class="notif-label-col" id="dateLabelCol">
                   <span class="notif-value-text" id="dateDisplayText">Today</span>
                 </div>
                 <div class="notif-actions-col">
-                  <button type="button" class="notif-icon-btn" id="calendarPickerBtn" title="Select Date">
+                  <button type="button" class="notif-icon-btn notif-action-btn-front" id="calendarPickerBtn" title="Select Date">
                     <i class="fa-regular fa-calendar-days"></i>
                   </button>
-                  <button type="button" class="notif-icon-btn clear-notif-btn" id="clearDateBtn" title="Clear Date">
+                  <button type="button" class="notif-icon-btn clear-notif-btn notif-action-btn-front" id="clearDateBtn" title="Clear Date">
                     <i class="fa-regular fa-circle-xmark"></i>
                   </button>
                 </div>
+                <!-- Native interactive date picker overlay for iOS Safari & modern browsers -->
+                <input type="date" id="hiddenDateInput" class="native-picker-overlay" aria-label="Select Date">
               </div>
 
               <div class="notif-divider"></div>
 
               <!-- Time Row -->
-              <div class="notif-row" id="timePickerRow">
+              <div class="notif-row notif-picker-row-relative" id="timePickerRow">
                 <div class="notif-label-col" id="timeLabelCol">
                   <span class="notif-value-text" id="timeDisplayText">Time not set (all day)</span>
                 </div>
                 <div class="notif-actions-col">
-                  <button type="button" class="notif-icon-btn" id="timePickerBtn" title="Select Time">
+                  <button type="button" class="notif-icon-btn notif-action-btn-front" id="timePickerBtn" title="Select Time">
                     <i class="fa-regular fa-clock"></i>
                   </button>
-                  <button type="button" class="notif-icon-btn clear-notif-btn" id="clearTimeBtn" title="Clear Time">
+                  <button type="button" class="notif-icon-btn clear-notif-btn notif-action-btn-front" id="clearTimeBtn" title="Clear Time">
                     <i class="fa-regular fa-circle-xmark"></i>
                   </button>
                 </div>
+                <!-- Native interactive time picker overlay for iOS Safari & modern browsers -->
+                <input type="time" id="hiddenTimeInput" class="native-picker-overlay" aria-label="Select Time">
               </div>
 
               <div class="notif-divider"></div>
@@ -220,6 +852,21 @@
           </header>
 
           <div class="settings-scroll-area">
+            <!-- PROFILE & SECURITY SECTION -->
+            <div class="form-section-title">Profile & Security</div>
+            <div class="form-card settings-card-box">
+              <div class="settings-list-item" id="settingProfileSecurityRow" style="cursor: pointer;">
+                <div class="settings-list-icon" style="color: var(--accent-cyan);">
+                  <i class="fa-solid fa-user-shield"></i>
+                </div>
+                <div class="settings-list-text">
+                  <div class="settings-main-title" id="settingProfileSecurityTitle">Profile Password</div>
+                  <div class="settings-sub-text" id="settingProfileSecuritySub">Tap to add or change password for this profile</div>
+                </div>
+                <span class="settings-value-pill" id="settingProfileSecurityPill" style="font-size: 0.76rem; font-weight: 600; color: #10b981;">Manage</span>
+              </div>
+            </div>
+
             <!-- GENERAL SECTION -->
             <div class="form-section-title">General</div>
             <div class="form-card settings-card-box">
@@ -442,6 +1089,34 @@
                 <i class="fa-solid fa-chevron-right" style="color: var(--text-muted); font-size: 0.8rem;"></i>
               </div>
             </div>
+
+            <!-- CLOUD DATABASE (CLOUDFLARE D1) SECTION -->
+            <div class="form-section-title">Cloud Database & Sync</div>
+            <div class="form-card settings-card-box">
+              <div class="settings-list-item" id="settingSyncNowRow" style="cursor: pointer;">
+                <div class="settings-list-icon">
+                  <i class="fa-solid fa-cloud-arrow-down" style="color: #10b981;"></i>
+                </div>
+                <div class="settings-list-text">
+                  <div class="settings-main-title">Sync with Database</div>
+                  <div class="settings-sub-text">Connected to emi-reminder-db &bull; Tap to sync now</div>
+                </div>
+                <span class="settings-value-pill" id="settingSyncBadge" style="color: #10b981; font-weight: 600;">Connected</span>
+              </div>
+
+              <div class="settings-item-divider"></div>
+
+              <div class="settings-list-item" id="settingDbDiagRow" style="cursor: pointer;">
+                <div class="settings-list-icon">
+                  <i class="fa-solid fa-server" style="color: #38bdf8;"></i>
+                </div>
+                <div class="settings-list-text">
+                  <div class="settings-main-title">Database Diagnostics</div>
+                  <div class="settings-sub-text" id="settingDbDiagSub">Check latency and remote status</div>
+                </div>
+                <i class="fa-solid fa-chevron-right" style="color: var(--text-muted); font-size: 0.8rem;"></i>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -475,6 +1150,27 @@
               <div class="brand-text-col">
                 <h2 class="brand-title">EMI Reminder</h2>
                 <span class="brand-sub">by bensec</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Drawer User Card -->
+          <div class="drawer-user-card" id="drawerUserCard">
+            <div class="user-avatar-circle" id="drawerUserAvatar">
+              <span id="drawerUserInitial">U</span>
+            </div>
+            <div class="user-details-col">
+              <span class="user-display-name" id="drawerUserName">User</span>
+              <div class="drawer-db-status" id="drawerDbStatus" style="font-size: 0.72rem; color: #10b981; display: flex; align-items: center; gap: 5px; margin-top: 2px;">
+                <i class="fa-solid fa-cloud-check" style="color: #10b981;"></i> D1 Connected
+              </div>
+              <div style="display: flex; gap: 12px; margin-top: 4px;">
+                <button class="user-switch-link" id="drawerSwitchUserBtn" type="button">
+                  <i class="fa-solid fa-users"></i> Switch
+                </button>
+                <button class="user-switch-link" id="drawerLogoutBtn" type="button" style="color: #f87171;">
+                  <i class="fa-solid fa-arrow-right-from-bracket"></i> Log Out
+                </button>
               </div>
             </div>
           </div>
@@ -537,6 +1233,95 @@
           </div>
         </div>
 
+        <!-- ================= USER ACCOUNTS & LOGIN MODAL ================= -->
+        <div class="modal-backdrop" id="authModalBackdrop" style="display: none;">
+          <div class="modal-dialog user-modal-dialog">
+            <div class="modal-header">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-users-viewfinder" style="color: var(--accent-cyan); font-size: 1.15rem;"></i>
+                <h3 class="modal-title">Switch / Manage Users</h3>
+              </div>
+              <button class="modal-close-btn" id="closeAuthModalBtn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+              <!-- Active User Banner -->
+              <div class="active-user-banner" id="activeUserBanner">
+                <div class="user-avatar-circle mini-active" id="modalActiveAvatar">U</div>
+                <div class="user-banner-info">
+                  <span class="user-banner-label">Signed in as</span>
+                  <span class="user-banner-name" id="modalActiveName">User</span>
+                </div>
+                <button class="logout-btn" id="logoutBtn" type="button" title="Sign out / Switch account">
+                  <i class="fa-solid fa-arrow-right-from-bracket"></i> Switch
+                </button>
+              </div>
+
+              <!-- Profile Password Management for Active User -->
+              <div class="profile-security-card" style="background: rgba(99, 102, 241, 0.08); border: 1px solid var(--border-glow); border-radius: 14px; padding: 12px 14px; margin: 12px 0 16px 0;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-key" style="color: var(--accent-cyan); font-size: 0.95rem;"></i>
+                    <span style="font-size: 0.88rem; font-weight: 600; color: #fff;" id="profileSecurityUserName">Profile Password</span>
+                  </div>
+                  <span id="profileSecurityStatusBadge" style="font-size: 0.72rem; padding: 2px 8px; border-radius: 12px; font-weight: 600; background: rgba(255,255,255,0.08); color: var(--text-secondary);">Checking...</span>
+                </div>
+                <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 8px;" id="profileSecurityDesc">
+                  Add or change password for this profile.
+                </p>
+                <div style="display: flex; gap: 8px;">
+                  <input type="password" id="profilePasswordInput" placeholder="Enter new password..." style="flex: 1; padding: 8px 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border-subtle); border-radius: 8px; color: #fff; font-size: 15px;" maxlength="30" autocomplete="new-password">
+                  <button type="button" class="action-submit-btn" id="saveProfilePasswordBtn" style="padding: 8px 14px; font-size: 0.82rem; white-space: nowrap; border-radius: 8px;">
+                    <i class="fa-solid fa-shield-halved"></i> Save
+                  </button>
+                </div>
+              </div>
+
+              <!-- Available Accounts -->
+              <div class="user-section-title">EXISTING USERS ON THIS DEVICE</div>
+              <div class="accounts-list" id="accountsListContainer">
+                <!-- Rendered dynamically -->
+              </div>
+
+              <!-- Create New User Profile -->
+              <div class="user-section-title" style="margin-top: 16px;">ADD NEW USER</div>
+              <div class="create-user-card">
+                <div class="input-row">
+                  <input type="text" id="newUsernameInput" placeholder="User name (e.g. Work, Personal, Alex)..." maxlength="25">
+                </div>
+                <div class="input-row" style="margin-top: 8px;">
+                  <input type="password" id="newUserPinInput" placeholder="Password (required for new user)" maxlength="30" autocomplete="new-password">
+                </div>
+                <div class="avatar-color-picker" id="avatarColorPicker">
+                  <span style="font-size: 0.76rem; color: var(--text-muted); margin-right: 4px;">Color:</span>
+                  <div class="color-dot-opt selected" data-color="#6366f1" style="background: #6366f1;"></div>
+                  <div class="color-dot-opt" data-color="#10b981" style="background: #10b981;"></div>
+                  <div class="color-dot-opt" data-color="#f43f5e" style="background: #f43f5e;"></div>
+                  <div class="color-dot-opt" data-color="#06b6d4" style="background: #06b6d4;"></div>
+                  <div class="color-dot-opt" data-color="#f59e0b" style="background: #f59e0b;"></div>
+                  <div class="color-dot-opt" data-color="#a855f7" style="background: #a855f7;"></div>
+                </div>
+                <button class="action-submit-btn" id="createUserSubmitBtn" type="button" style="margin-top: 12px; width: 100%;">
+                  <i class="fa-solid fa-user-plus"></i> Create & Switch User
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= PASSWORD VERIFICATION MODAL ================= -->
+        <div class="modal-dialog-backdrop" id="pinModalBackdrop" style="display: none; z-index: 10001;">
+          <div class="repeat-dialog-card" style="max-width: 290px; text-align: center;">
+            <div class="repeat-dialog-title" id="pinModalTitle">Enter Password</div>
+            <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 12px;" id="pinPromptText">This account is protected with a password.</p>
+            <input type="password" id="pinVerifyInput" placeholder="Enter password..." style="text-align: center; font-size: 1.15rem; width: 100%; padding: 8px 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-glow); border-radius: 8px; color: #fff; outline: none;" maxlength="30" autocomplete="current-password">
+            <p id="pinErrorMsg" style="color: var(--text-overdue); font-size: 0.8rem; margin-top: 6px; display: none;">Incorrect password</p>
+            <div style="display: flex; gap: 8px; margin-top: 14px;">
+              <button type="button" class="repeat-dialog-cancel" id="cancelPinVerifyBtn" style="flex: 1;">Cancel</button>
+              <button type="button" class="action-submit-btn" id="submitPinVerifyBtn" style="flex: 1;">Unlock</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Notification Toast -->
         <div class="toast-container" id="toastContainer"></div>
 
@@ -544,6 +1329,6 @@
     </div><!-- device-frame -->
   </div><!-- desktop-wrapper -->
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20261028_fix_v2"></script>
 </body>
 </html>

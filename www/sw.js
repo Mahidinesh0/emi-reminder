@@ -1,19 +1,20 @@
-const CACHE_NAME = 'todo-reminders-v6';
+const CACHE_NAME = 'todo-reminders-v20261028_fix_v2';
 const ASSETS_TO_CACHE = [
-  './',
-  './index.html',
-  './styles.css',
-  './app.js',
-  './manifest.json',
-  './reminder_sound.wav',
-  './icon-192.png',
-  './icon-512.png'
+  '/',
+  '/index.html',
+  '/styles.css',
+  '/app.js',
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await Promise.allSettled(
+        ASSETS_TO_CACHE.map(asset => cache.add(asset).catch(() => {}))
+      );
     }).then(() => self.skipWaiting())
   );
 });
@@ -35,6 +36,8 @@ self.addEventListener('activate', (event) => {
 // Network-first with cache fallback for fresh updates
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // NEVER cache API calls - always fresh from Cloudflare D1
+  if (event.request.url.includes('/api/')) return;
 
   event.respondWith(
     fetch(event.request)

@@ -1,34 +1,584 @@
-// ================= DATA & STATE =================
-const DEFAULT_LISTS = ['Default', 'Personal', 'Shopping', 'Wishlist', 'Work'];
+// ================= ROBUST SAFARI & IOS STORAGE COMPATIBILITY =================
+(function initStoragePolyfill() {
+  let isLocalStorageAvailable = false;
+  try {
+    const testKey = '__storage_test__';
+    window.localStorage.setItem(testKey, testKey);
+    window.localStorage.removeItem(testKey);
+    isLocalStorageAvailable = true;
+  } catch (e) {
+    isLocalStorageAvailable = false;
+  }
 
-const INITIAL_TASKS = [];
+  if (!isLocalStorageAvailable) {
+    const inMemoryStore = {};
+    const mockStorage = {
+      getItem: (key) => inMemoryStore[key] !== undefined ? inMemoryStore[key] : null,
+      setItem: (key, val) => { inMemoryStore[key] = String(val); },
+      removeItem: (key) => { delete inMemoryStore[key]; },
+      clear: () => { Object.keys(inMemoryStore).forEach(k => delete inMemoryStore[k]); },
+      get length() { return Object.keys(inMemoryStore).length; },
+      key: (i) => Object.keys(inMemoryStore)[i] || null
+    };
+    try {
+      Object.defineProperty(window, 'localStorage', { value: mockStorage });
+    } catch (err) {}
+  }
 
-// Clear existing sample tasks on user request
-if (!localStorage.getItem('ios_reminders_tasks_cleared_v2')) {
-  localStorage.setItem('ios_reminders_tasks_v2', '[]');
-  localStorage.setItem('ios_reminders_history', '[]');
-  localStorage.setItem('ios_reminders_notified_v1', '[]');
-  localStorage.setItem('ios_reminders_tasks_cleared_v2', 'true');
+  let isSessionStorageAvailable = false;
+  try {
+    const testKey = '__session_test__';
+    window.sessionStorage.setItem(testKey, testKey);
+    window.sessionStorage.removeItem(testKey);
+    isSessionStorageAvailable = true;
+  } catch (e) {
+    isSessionStorageAvailable = false;
+  }
+
+  if (!isSessionStorageAvailable) {
+    const inMemorySessionStore = {};
+    const mockSessionStorage = {
+      getItem: (key) => inMemorySessionStore[key] !== undefined ? inMemorySessionStore[key] : null,
+      setItem: (key, val) => { inMemorySessionStore[key] = String(val); },
+      removeItem: (key) => { delete inMemorySessionStore[key]; },
+      clear: () => { Object.keys(inMemorySessionStore).forEach(k => delete inMemorySessionStore[k]); },
+      get length() { return Object.keys(inMemorySessionStore).length; },
+      key: (i) => Object.keys(inMemorySessionStore)[i] || null
+    };
+    try {
+      Object.defineProperty(window, 'sessionStorage', { value: mockSessionStorage });
+    } catch (err) {}
+  }
+})();
+
+function safeStorageGet(key, fallback = null) {
+  try {
+    const val = localStorage.getItem(key);
+    return val !== null && val !== undefined ? val : fallback;
+  } catch (e) {
+    return fallback;
+  }
 }
 
+function safeStorageSet(key, val) {
+  try {
+    localStorage.setItem(key, String(val));
+  } catch (e) {}
+}
+
+function safeStorageRemove(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch (e) {}
+}
+
+function safeSessionGet(key, fallback = null) {
+  try {
+    const val = sessionStorage.getItem(key);
+    return val !== null && val !== undefined ? val : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function safeSessionSet(key, val) {
+  try {
+    sessionStorage.setItem(key, String(val));
+  } catch (e) {}
+}
+
+function safeSessionRemove(key) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch (e) {}
+}
+
+function safeJsonParse(str, fallback) {
+  if (!str) return fallback;
+  try {
+    const val = JSON.parse(str);
+    return val !== undefined && val !== null ? val : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function safeParseDate(val) {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// ================= DATA & STATE =================
+const DEFAULT_LISTS = ['Default', 'Personal', 'Shopping', 'Wishlist', 'Work'];
+const INITIAL_TASKS = [];
+
+// ================= USER & PROFILE MANAGEMENT =================
+const USER_KEY_USERS = 'ios_reminders_users_list_v2';
+const USER_KEY_CURRENT = 'ios_reminders_current_user_id_v2';
+
+let userState = {
+  users: [],
+  currentUserId: null,
+  selectedNewAvatarColor: '#6366f1'
+};
+
+function getUserStoragePrefix(uid) {
+  const id = uid || userState.currentUserId || 'default';
+  return `ios_reminders_u_${id}_`;
+}
+
+function initUsersSystem() {
+  let storedUsers = [];
+  try {
+    storedUsers = JSON.parse(localStorage.getItem(USER_KEY_USERS)) || [];
+  } catch (e) {
+    storedUsers = [];
+  }
+
+  let currentId = localStorage.getItem(USER_KEY_CURRENT);
+
+  // If no users exist, create initial Ben & Mahi profiles matching the design
+  if (!storedUsers || storedUsers.length === 0) {
+    const legacyTasks = localStorage.getItem('ios_reminders_tasks_v2');
+    const legacyLists = localStorage.getItem('ios_reminders_lists_v2');
+    const legacyHistory = localStorage.getItem('ios_reminders_history');
+    const legacyPalette = localStorage.getItem('ios_reminders_palette');
+    const legacySettings = localStorage.getItem('ios_reminders_settings');
+
+    const userBen = {
+      id: 'user_ben',
+      username: 'Ben',
+      avatarColor: '#0284c7',
+      themeClass: 'theme-blue',
+      pin: '',
+      createdAt: Date.now() - 1000
+    };
+    const userMahi = {
+      id: 'user_mahi',
+      username: 'Mahi',
+      avatarColor: '#9333ea',
+      themeClass: 'theme-purple',
+      pin: '',
+      createdAt: Date.now()
+    };
+
+    storedUsers = [userBen, userMahi];
+    currentId = userMahi.id;
+
+    // Migrate any previous data into Mahi's account
+    const prefix = `ios_reminders_u_${userMahi.id}_`;
+    if (legacyTasks) localStorage.setItem(`${prefix}tasks_v2`, legacyTasks);
+    if (legacyLists) localStorage.setItem(`${prefix}lists_v2`, legacyLists);
+    if (legacyHistory) localStorage.setItem(`${prefix}history`, legacyHistory);
+    if (legacyPalette) localStorage.setItem(`${prefix}palette`, legacyPalette);
+    if (legacySettings) localStorage.setItem(`${prefix}settings`, legacySettings);
+
+    // Initialize Ben's account cleanly as empty
+    const benPrefix = `ios_reminders_u_${userBen.id}_`;
+    localStorage.setItem(`${benPrefix}tasks_v2`, '[]');
+    localStorage.setItem(`${benPrefix}lists_v2`, JSON.stringify(DEFAULT_LISTS));
+    localStorage.setItem(`${benPrefix}history`, '[]');
+
+    localStorage.setItem(USER_KEY_USERS, JSON.stringify(storedUsers));
+    localStorage.setItem(USER_KEY_CURRENT, currentId);
+  }
+
+  // Self-healing migration: If Ben has any tasks, transfer them to Mahi and clear Ben
+  const benPrefix = `ios_reminders_u_user_ben_`;
+  const mahiPrefix = `ios_reminders_u_user_mahi_`;
+  try {
+    const benTasks = JSON.parse(localStorage.getItem(`${benPrefix}tasks_v2`) || '[]');
+    let mahiTasks = JSON.parse(localStorage.getItem(`${mahiPrefix}tasks_v2`) || '[]');
+
+    if (Array.isArray(benTasks) && benTasks.length > 0) {
+      benTasks.forEach(bt => {
+        if (!mahiTasks.some(mt => mt.id === bt.id || mt.title === bt.title)) {
+          mahiTasks.unshift(bt);
+        }
+      });
+      localStorage.setItem(`${mahiPrefix}tasks_v2`, JSON.stringify(mahiTasks));
+      localStorage.setItem(`${mahiPrefix}updated_at`, String(Date.now()));
+    }
+    // Always clear Ben's tasks so Ben starts clean
+    localStorage.setItem(`${benPrefix}tasks_v2`, '[]');
+    localStorage.setItem(`${benPrefix}history`, '[]');
+    localStorage.setItem(`${benPrefix}updated_at`, String(Date.now()));
+  } catch(e) {}
+
+  // Ensure themeClass exists on all profiles
+  const THEME_CYCLE = ['theme-blue', 'theme-purple', 'theme-emerald', 'theme-sunset', 'theme-amber'];
+  storedUsers.forEach((u, idx) => {
+    if (!u.themeClass) {
+      u.themeClass = THEME_CYCLE[idx % THEME_CYCLE.length];
+    }
+  });
+
+  // Ensure current user is valid
+  let active = storedUsers.find(u => u.id === currentId);
+  if (!active) {
+    active = storedUsers[0];
+    currentId = active.id;
+    localStorage.setItem(USER_KEY_CURRENT, currentId);
+  }
+
+  userState.users = storedUsers;
+  userState.currentUserId = currentId;
+}
+
+initUsersSystem();
+
+function getActiveUser() {
+  return userState.users.find(u => u.id === userState.currentUserId) || userState.users[0] || {
+    id: 'guest',
+    username: 'Guest',
+    avatarColor: '#6366f1'
+  };
+}
+
+const initialPrefix = getUserStoragePrefix();
 let appState = {
-  tasks: JSON.parse(localStorage.getItem('ios_reminders_tasks_v2')) || [],
-  lists: JSON.parse(localStorage.getItem('ios_reminders_lists_v2')) || DEFAULT_LISTS,
-  finishedHistory: JSON.parse(localStorage.getItem('ios_reminders_history')) || [],
+  tasks: safeJsonParse(safeStorageGet(`${initialPrefix}tasks_v2`), []),
+  lists: safeJsonParse(safeStorageGet(`${initialPrefix}lists_v2`), DEFAULT_LISTS),
+  finishedHistory: safeJsonParse(safeStorageGet(`${initialPrefix}history`), []),
   currentList: 'All Lists',
   searchQuery: '',
-  colorTheme: localStorage.getItem('ios_reminders_palette') || 'theme-indigo',
+  colorTheme: safeStorageGet(`${initialPrefix}palette`, 'theme-indigo'),
   audioEnabled: true
 };
 
-function saveState() {
-  localStorage.setItem('ios_reminders_tasks_v2', JSON.stringify(appState.tasks));
-  localStorage.setItem('ios_reminders_lists_v2', JSON.stringify(appState.lists));
-  localStorage.setItem('ios_reminders_history', JSON.stringify(appState.finishedHistory));
-  localStorage.setItem('ios_reminders_palette', appState.colorTheme);
+function saveStateForUser(uid) {
+  const targetId = uid || userState.currentUserId;
+  if (!targetId) return;
+
+  const p = getUserStoragePrefix(targetId);
+  const now = Date.now();
+  localStorage.setItem(`${p}tasks_v2`, JSON.stringify(appState.tasks));
+  localStorage.setItem(`${p}lists_v2`, JSON.stringify(appState.lists));
+  localStorage.setItem(`${p}history`, JSON.stringify(appState.finishedHistory));
+  localStorage.setItem(`${p}palette`, appState.colorTheme);
+  localStorage.setItem(`${p}updated_at`, String(now));
+  appState.lastUpdatedAt = now;
+  if (appState.settings) {
+    localStorage.setItem(`${p}settings`, JSON.stringify(appState.settings));
+  }
   if (typeof syncScheduledNotifications === 'function') {
     syncScheduledNotifications();
   }
+}
+
+function saveState() {
+  const activeId = userState.currentUserId;
+  if (!activeId) return;
+  saveStateForUser(activeId);
+  scheduleCloudSyncPush(activeId);
+}
+
+// ================= CLOUDFLARE D1 CLOUD SYNC ENGINE =================
+const CLOUD_API_BASE = (window.location.protocol === 'http:' || window.location.protocol === 'https:') &&
+  (window.location.hostname.includes('11121113.xyz') || window.location.hostname.includes('pages.dev'))
+    ? ''
+    : 'https://emiforyou.11121113.xyz';
+
+let syncState = {
+  status: 'idle', // 'idle' | 'syncing' | 'synced' | 'offline'
+  lastSyncTime: null,
+  isPulling: false,
+  pushTimer: null
+};
+
+function setSyncStatus(status) {
+  syncState.status = status;
+  const statusBtn = document.getElementById('cloudSyncStatusBtn');
+  const statusIcon = document.getElementById('syncStatusIcon');
+  const drawerStatus = document.getElementById('drawerDbStatus');
+  const settingsStatusBadge = document.getElementById('settingSyncBadge');
+
+  if (status === 'syncing') {
+    if (statusBtn) {
+      statusBtn.className = 'icon-btn sync-indicator-btn syncing';
+      statusBtn.title = 'Syncing with Cloudflare D1...';
+    }
+    if (statusIcon) {
+      statusIcon.className = 'fa-solid fa-arrows-rotate fa-spin';
+      statusIcon.style.color = '#38bdf8';
+    }
+    if (drawerStatus) {
+      drawerStatus.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin" style="color: #38bdf8;"></i> Syncing...';
+    }
+  } else if (status === 'synced') {
+    syncState.lastSyncTime = Date.now();
+    if (statusBtn) {
+      statusBtn.className = 'icon-btn sync-indicator-btn synced';
+      statusBtn.title = 'Cloud DB Connected & Synced (Click to sync now)';
+    }
+    if (statusIcon) {
+      statusIcon.className = 'fa-solid fa-cloud-check';
+      statusIcon.style.color = '#10b981';
+    }
+    if (drawerStatus) {
+      drawerStatus.innerHTML = '<i class="fa-solid fa-cloud-check" style="color: #10b981;"></i> D1 Connected';
+    }
+    if (settingsStatusBadge) {
+      settingsStatusBadge.textContent = 'Connected & Synced';
+      settingsStatusBadge.style.color = '#10b981';
+    }
+  } else if (status === 'offline') {
+    if (statusBtn) {
+      statusBtn.className = 'icon-btn sync-indicator-btn offline';
+      statusBtn.title = 'Offline mode (Saved locally)';
+    }
+    if (statusIcon) {
+      statusIcon.className = 'fa-solid fa-cloud-slash';
+      statusIcon.style.color = '#f59e0b';
+    }
+    if (drawerStatus) {
+      drawerStatus.innerHTML = '<i class="fa-solid fa-cloud-slash" style="color: #f59e0b;"></i> Offline (Local)';
+    }
+  }
+}
+
+function scheduleCloudSyncPush(targetUserId) {
+  const uid = targetUserId || userState.currentUserId;
+  if (!uid) return;
+
+  if (syncState.pushTimer) {
+    clearTimeout(syncState.pushTimer);
+    syncState.pushTimer = null;
+  }
+
+  // Bind snapshot strictly to target user ID
+  const p = getUserStoragePrefix(uid);
+  const user = userState.users.find(u => u.id === uid);
+  if (!user) return;
+
+  const payload = {
+    userId: user.id,
+    username: user.username,
+    updatedAt: Number(localStorage.getItem(`${p}updated_at`)) || Date.now(),
+    data: {
+      tasks: JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [],
+      lists: JSON.parse(localStorage.getItem(`${p}lists_v2`)) || DEFAULT_LISTS,
+      finishedHistory: JSON.parse(localStorage.getItem(`${p}history`)) || [],
+      colorTheme: localStorage.getItem(`${p}palette`) || user.themeClass || 'theme-indigo',
+      settings: JSON.parse(localStorage.getItem(`${p}settings`)) || (typeof loadCurrentUserSettings === 'function' ? loadCurrentUserSettings() : null)
+    }
+  };
+
+  syncState.pushTimer = setTimeout(() => {
+    cloudSyncPushPayload(payload);
+  }, 400);
+}
+
+async function cloudSyncPushPayload(payload) {
+  if (!payload || !payload.userId) return;
+
+  setSyncStatus('syncing');
+
+  try {
+    const resp = await fetch(`${CLOUD_API_BASE}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (resp.status === 409) {
+      // Remote is strictly newer; pull remote changes for this user
+      if (userState.currentUserId === payload.userId) {
+        await cloudSyncPull(true, payload.userId);
+      }
+      return;
+    }
+
+    if (resp.ok) {
+      setSyncStatus('synced');
+    } else {
+      setSyncStatus('offline');
+    }
+  } catch (err) {
+    console.warn('Cloud sync push error (offline):', err);
+    setSyncStatus('offline');
+  }
+}
+
+async function cloudSyncPull(force = false, expectedUserId = null) {
+  if (syncState.isPulling) return;
+  const currentUid = expectedUserId || userState.currentUserId;
+  if (!currentUid) return;
+
+  const user = userState.users.find(u => u.id === currentUid);
+  if (!user) return;
+
+  syncState.isPulling = true;
+  setSyncStatus('syncing');
+
+  try {
+    const resp = await fetch(`${CLOUD_API_BASE}/api/sync?userId=${encodeURIComponent(currentUid)}`, {
+      cache: 'no-store'
+    });
+
+    // Guard: active user must not have changed during fetch
+    if (userState.currentUserId !== currentUid) {
+      syncState.isPulling = false;
+      return;
+    }
+
+    if (!resp.ok) {
+      setSyncStatus('offline');
+      syncState.isPulling = false;
+      return;
+    }
+
+    const result = await resp.json();
+    if (!result || result.userId !== currentUid) {
+      syncState.isPulling = false;
+      return;
+    }
+
+    const p = getUserStoragePrefix(currentUid);
+
+    if (!result.found) {
+      // No remote record yet for this user: push strictly this user's local tasks if any
+      const userLocalTasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
+      if (userLocalTasks.length > 0) {
+        scheduleCloudSyncPush(currentUid);
+      } else {
+        setSyncStatus('synced');
+      }
+      syncState.isPulling = false;
+      return;
+    }
+
+    const remoteData = result.data;
+    const remoteUpdatedAt = Number(result.updatedAt) || 0;
+    const localUpdatedAt = Number(localStorage.getItem(`${p}updated_at`)) || 0;
+    const userLocalTasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
+    const hasRemoteTasks = remoteData && Array.isArray(remoteData.tasks) && remoteData.tasks.length > 0;
+    const hasLocalTasks = userLocalTasks.length > 0;
+
+    // Safety guard: if local has no tasks but remote has tasks, ALWAYS adopt remote tasks!
+    if (force || remoteUpdatedAt >= localUpdatedAt || (!hasLocalTasks && hasRemoteTasks)) {
+      if (remoteData) {
+        const freshLocalTasks = userLocalTasks.filter(t => (t.createdAt || 0) > remoteUpdatedAt);
+        const mergedTasks = [...(remoteData.tasks || [])];
+        freshLocalTasks.forEach(lt => {
+          if (!mergedTasks.some(mt => mt.id === lt.id)) {
+            mergedTasks.unshift(lt);
+          }
+        });
+
+        // Update active appState ONLY if this user is still the active user
+        if (userState.currentUserId === currentUid) {
+          appState.tasks = mergedTasks;
+          if (Array.isArray(remoteData.lists) && remoteData.lists.length) {
+            appState.lists = Array.from(new Set([...DEFAULT_LISTS, ...remoteData.lists]));
+          }
+          if (Array.isArray(remoteData.finishedHistory)) {
+            appState.finishedHistory = remoteData.finishedHistory;
+          }
+          if (remoteData.colorTheme && remoteData.colorTheme !== appState.colorTheme) {
+            appState.colorTheme = remoteData.colorTheme;
+            applyTheme(appState.colorTheme, false);
+          }
+          if (remoteData.settings && typeof loadCurrentUserSettings === 'function') {
+            appState.settings = { ...loadCurrentUserSettings(), ...remoteData.settings };
+            if (typeof saveCurrentUserSettings === 'function') {
+              saveCurrentUserSettings(appState.settings);
+            }
+            if (typeof updateSettingsUI === 'function') {
+              updateSettingsUI();
+            }
+          }
+        }
+
+        const newLatest = Math.max(remoteUpdatedAt, Date.now());
+        localStorage.setItem(`${p}tasks_v2`, JSON.stringify(mergedTasks));
+        localStorage.setItem(`${p}lists_v2`, JSON.stringify(remoteData.lists || DEFAULT_LISTS));
+        localStorage.setItem(`${p}history`, JSON.stringify(remoteData.finishedHistory || []));
+        if (remoteData.colorTheme) localStorage.setItem(`${p}palette`, remoteData.colorTheme);
+        localStorage.setItem(`${p}updated_at`, String(newLatest));
+        if (userState.currentUserId === currentUid) {
+          appState.lastUpdatedAt = newLatest;
+          if (typeof renderTasks === 'function') renderTasks();
+          if (typeof renderDrawerLists === 'function') renderDrawerLists();
+          if (typeof syncScheduledNotifications === 'function') {
+            syncScheduledNotifications();
+          }
+        }
+      }
+    } else if (localUpdatedAt > remoteUpdatedAt) {
+      // NEVER overwrite remote tasks if local is empty and remote has tasks!
+      if (!hasLocalTasks && hasRemoteTasks) {
+        console.warn('Blocked cloud push: local is empty while remote has tasks. Pulling remote instead.');
+        cloudSyncPull(true, currentUid);
+        return;
+      }
+      scheduleCloudSyncPush(currentUid);
+    }
+
+    setSyncStatus('synced');
+  } catch (err) {
+    console.warn('Cloud sync pull error:', err);
+    setSyncStatus('offline');
+  } finally {
+    syncState.isPulling = false;
+  }
+}
+
+async function syncProfilesPull() {
+  try {
+    const resp = await fetch(`${CLOUD_API_BASE}/api/sync?userId=__profiles__`, { cache: 'no-store' });
+    if (!resp.ok) return;
+    const res = await resp.json();
+    if (res && res.found && Array.isArray(res.data) && res.data.length > 0) {
+      const remoteProfiles = res.data;
+      let changed = false;
+      remoteProfiles.forEach(rp => {
+        const existing = userState.users.find(u => u.id === rp.id);
+        if (!existing) {
+          userState.users.push(rp);
+          changed = true;
+        } else {
+          if (rp.username && rp.username !== existing.username) {
+            existing.username = rp.username;
+            changed = true;
+          }
+          if (rp.themeClass && rp.themeClass !== existing.themeClass) {
+            existing.themeClass = rp.themeClass;
+            changed = true;
+          }
+          if (rp.pin !== undefined && rp.pin !== existing.pin) {
+            existing.pin = rp.pin;
+            changed = true;
+          }
+        }
+      });
+      if (changed) {
+        localStorage.setItem(USER_KEY_USERS, JSON.stringify(userState.users));
+        if (typeof renderLoginProfiles === 'function') renderLoginProfiles();
+        if (typeof renderDrawerAccountsList === 'function') renderDrawerAccountsList();
+        if (typeof updateProfileSecurityUI === 'function') updateProfileSecurityUI();
+        if (typeof renderAccountsListModal === 'function') renderAccountsListModal();
+      }
+    } else if (userState.users && userState.users.length > 0) {
+      syncProfilesPush();
+    }
+  } catch (e) {}
+}
+
+async function syncProfilesPush() {
+  try {
+    await fetch(`${CLOUD_API_BASE}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: '__profiles__',
+        username: 'Profiles Registry',
+        updatedAt: Date.now(),
+        data: userState.users
+      })
+    });
+  } catch (e) {}
 }
 
 // ================= AUDIO SYNTHESIS & NOTIFICATION SOUNDS =================
@@ -210,19 +760,27 @@ if (liveClock) {
 
 // ================= THEME & PALETTES =================
 const PALETTES = ['theme-indigo', 'theme-emerald', 'theme-sunset', 'theme-light'];
-function applyTheme(palette) {
+function applyTheme(palette, shouldSave = false) {
   PALETTES.forEach(p => document.body.classList.remove(p));
   document.body.classList.add(palette);
   appState.colorTheme = palette;
-  themeIcon.className = palette === 'theme-light' ? 'fa-solid fa-moon' : 'fa-regular fa-sun';
-  saveState();
+  if (themeIcon) {
+    themeIcon.className = palette === 'theme-light' ? 'fa-solid fa-moon' : 'fa-regular fa-sun';
+  }
+  if (userState.currentUserId) {
+    const p = getUserStoragePrefix(userState.currentUserId);
+    localStorage.setItem(`${p}palette`, palette);
+  }
+  if (shouldSave) {
+    saveState();
+  }
 }
 
 themeToggleBtn.addEventListener('click', () => {
   playSound('pop');
   const currentIdx = PALETTES.indexOf(appState.colorTheme);
   const nextIdx = (currentIdx + 1) % PALETTES.length;
-  applyTheme(PALETTES[nextIdx]);
+  applyTheme(PALETTES[nextIdx], true);
   const names = {
     'theme-indigo': 'Electric Indigo',
     'theme-emerald': 'Cyber Emerald',
@@ -321,7 +879,9 @@ function formatDisplayGroup(task) {
   if (task.completed) return 'Finished';
   if (!task.dueDate) return 'No Date';
 
-  const date = new Date(task.dueDate);
+  const date = safeParseDate(task.dueDate);
+  if (!date) return 'No Date';
+
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const taskDateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -332,27 +892,42 @@ function formatDisplayGroup(task) {
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Tomorrow';
 
-  return date.toLocaleString('default', { month: 'long' });
+  try {
+    return date.toLocaleString('default', { month: 'long' });
+  } catch (e) {
+    return 'Upcoming';
+  }
 }
 
 function formatTaskMeta(task) {
   if (!task.dueDate) return 'Not set';
-  const d = new Date(task.dueDate);
+  const d = safeParseDate(task.dueDate);
+  if (!d) return 'Not set';
+
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const taskDateOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((taskDateOnly - today) / (1000 * 60 * 60 * 24));
 
   const is24h = appState.settings && appState.settings.timeFormat === '24-hour';
-  const timeStr = d.toLocaleTimeString('en-US', {
-    hour: is24h ? '2-digit' : 'numeric',
-    minute: '2-digit',
-    hour12: !is24h
-  });
+  let timeStr = '';
+  try {
+    timeStr = d.toLocaleTimeString('en-US', {
+      hour: is24h ? '2-digit' : 'numeric',
+      minute: '2-digit',
+      hour12: !is24h
+    });
+  } catch (e) {
+    timeStr = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
 
-  if (diffDays === 1) return `Tomorrow, ${timeStr}`;
-  if (diffDays === 0) return `Today, ${timeStr}`;
-  return `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, ${timeStr}`;
+  try {
+    if (diffDays === 1) return `Tomorrow, ${timeStr}`;
+    if (diffDays === 0) return `Today, ${timeStr}`;
+    return `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, ${timeStr}`;
+  } catch (e) {
+    return timeStr || 'Due';
+  }
 }
 
 // ================= RENDER TASKS =================
@@ -743,62 +1318,76 @@ function closeNewTaskView() {
 openNewTaskBtn.addEventListener('click', openNewTaskView);
 closeNewTaskBtn.addEventListener('click', closeNewTaskView);
 
-// Date Picker Handlers
+// Date Picker Handlers (iOS Safari & Modern Browser Compatible)
 function triggerDatePicker() {
-  if (hiddenDateInput.showPicker) {
+  if (!hiddenDateInput) return;
+  if (typeof hiddenDateInput.showPicker === 'function') {
     try { hiddenDateInput.showPicker(); } catch (e) { hiddenDateInput.focus(); }
   } else {
-    hiddenDateInput.focus();
-    hiddenDateInput.click();
+    try { hiddenDateInput.focus(); } catch (e) {}
   }
 }
-calendarPickerBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  triggerDatePicker();
-});
-dateLabelCol.addEventListener('click', triggerDatePicker);
+if (calendarPickerBtn) {
+  calendarPickerBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerDatePicker();
+  });
+}
+if (dateLabelCol) dateLabelCol.addEventListener('click', triggerDatePicker);
 
-hiddenDateInput.addEventListener('change', () => {
-  if (hiddenDateInput.value) {
-    const [y, m, d] = hiddenDateInput.value.split('-').map(Number);
-    currentTaskDate = new Date(y, m - 1, d);
+if (hiddenDateInput) {
+  hiddenDateInput.addEventListener('change', () => {
+    if (hiddenDateInput.value) {
+      const parts = hiddenDateInput.value.split('-').map(Number);
+      if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+        currentTaskDate = new Date(parts[0], parts[1] - 1, parts[2]);
+        updateNotificationDisplay();
+      }
+    }
+  });
+}
+if (clearDateBtn) {
+  clearDateBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    currentTaskDate = null;
+    if (hiddenDateInput) hiddenDateInput.value = '';
     updateNotificationDisplay();
-  }
-});
-clearDateBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  currentTaskDate = null;
-  hiddenDateInput.value = '';
-  updateNotificationDisplay();
-});
+  });
+}
 
-// Time Picker Handlers
+// Time Picker Handlers (iOS Safari & Modern Browser Compatible)
 function triggerTimePicker() {
-  if (hiddenTimeInput.showPicker) {
+  if (!hiddenTimeInput) return;
+  if (typeof hiddenTimeInput.showPicker === 'function') {
     try { hiddenTimeInput.showPicker(); } catch (e) { hiddenTimeInput.focus(); }
   } else {
-    hiddenTimeInput.focus();
-    hiddenTimeInput.click();
+    try { hiddenTimeInput.focus(); } catch (e) {}
   }
 }
-timePickerBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  triggerTimePicker();
-});
-timeLabelCol.addEventListener('click', triggerTimePicker);
+if (timePickerBtn) {
+  timePickerBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerTimePicker();
+  });
+}
+if (timeLabelCol) timeLabelCol.addEventListener('click', triggerTimePicker);
 
-hiddenTimeInput.addEventListener('change', () => {
-  if (hiddenTimeInput.value) {
-    currentTaskTime = hiddenTimeInput.value;
+if (hiddenTimeInput) {
+  hiddenTimeInput.addEventListener('change', () => {
+    if (hiddenTimeInput.value) {
+      currentTaskTime = hiddenTimeInput.value;
+      updateNotificationDisplay();
+    }
+  });
+}
+if (clearTimeBtn) {
+  clearTimeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    currentTaskTime = null;
+    if (hiddenTimeInput) hiddenTimeInput.value = '';
     updateNotificationDisplay();
-  }
-});
-clearTimeBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  currentTaskTime = null;
-  hiddenTimeInput.value = '';
-  updateNotificationDisplay();
-});
+  });
+}
 
 // Repeat Handlers
 repeatToggle.addEventListener('change', () => {
@@ -944,34 +1533,52 @@ if (shareTaskBtn) {
 
 // ================= SPEECH TO TEXT =================
 let recognition = null;
-if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.interimResults = false;
+try {
+  const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognitionClass) {
+    recognition = new SpeechRecognitionClass();
+    recognition.continuous = false;
+    recognition.interimResults = false;
 
-  recognition.onstart = () => {
-    voiceInputBtn.classList.add('listening');
-    showToast('Listening...', 'fa-microphone');
-  };
+    recognition.onstart = () => {
+      if (voiceInputBtn) voiceInputBtn.classList.add('listening');
+      showToast('Listening...', 'fa-microphone');
+    };
 
-  recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
-    taskTitleInput.value = (taskTitleInput.value ? taskTitleInput.value + ' ' : '') + transcript;
-    voiceInputBtn.classList.remove('listening');
-  };
+    recognition.onresult = (event) => {
+      if (event && event.results && event.results[0] && event.results[0][0]) {
+        const transcript = event.results[0][0].transcript;
+        if (taskTitleInput) {
+          taskTitleInput.value = (taskTitleInput.value ? taskTitleInput.value + ' ' : '') + transcript;
+        }
+      }
+      if (voiceInputBtn) voiceInputBtn.classList.remove('listening');
+    };
 
-  recognition.onerror = () => voiceInputBtn.classList.remove('listening');
-  recognition.onend = () => voiceInputBtn.classList.remove('listening');
+    recognition.onerror = () => {
+      if (voiceInputBtn) voiceInputBtn.classList.remove('listening');
+    };
+    recognition.onend = () => {
+      if (voiceInputBtn) voiceInputBtn.classList.remove('listening');
+    };
+  }
+} catch (e) {
+  recognition = null;
 }
 
-voiceInputBtn.addEventListener('click', () => {
-  if (!recognition) {
-    showToast('Voice input not supported in this browser', 'fa-triangle-exclamation');
-    return;
-  }
-  try { recognition.start(); } catch (e) { recognition.stop(); }
-});
+if (voiceInputBtn) {
+  voiceInputBtn.addEventListener('click', () => {
+    if (!recognition) {
+      showToast('Voice input not supported in this browser', 'fa-triangle-exclamation');
+      return;
+    }
+    try {
+      recognition.start();
+    } catch (e) {
+      try { recognition.stop(); } catch (err) {}
+    }
+  });
+}
 
 // ================= SEARCH =================
 toggleSearchBtn.addEventListener('click', () => {
@@ -1077,8 +1684,769 @@ fullscreenToggleBtn.addEventListener('click', () => {
   viewToggleBtn.classList.remove('active');
 });
 
+// ================= USER INTERFACE & SWITCHING LOGIC =================
+function updateUserUI() {
+  const user = getActiveUser();
+  const initial = (user.username || 'U').charAt(0).toUpperCase();
+
+  // Top app bar
+  const topUserAvatar = document.getElementById('topUserAvatar');
+  const topUserInitial = document.getElementById('topUserInitial');
+  const topUserName = document.getElementById('topUserName');
+
+  if (topUserAvatar) topUserAvatar.style.background = user.avatarColor || '#6366f1';
+  if (topUserInitial) topUserInitial.textContent = initial;
+  if (topUserName) topUserName.textContent = user.username;
+
+  // Drawer
+  const drawerUserAvatar = document.getElementById('drawerUserAvatar');
+  const drawerUserInitial = document.getElementById('drawerUserInitial');
+  const drawerUserName = document.getElementById('drawerUserName');
+
+  if (drawerUserAvatar) drawerUserAvatar.style.background = user.avatarColor || '#6366f1';
+  if (drawerUserInitial) drawerUserInitial.textContent = initial;
+  if (drawerUserName) drawerUserName.textContent = user.username;
+
+  // Modal active banner
+  const modalActiveAvatar = document.getElementById('modalActiveAvatar');
+  const modalActiveName = document.getElementById('modalActiveName');
+  if (modalActiveAvatar) {
+    modalActiveAvatar.style.background = user.avatarColor || '#6366f1';
+    modalActiveAvatar.textContent = initial;
+  }
+  if (modalActiveName) modalActiveName.textContent = user.username;
+  updateProfileSecurityUI();
+}
+
+function updateProfileSecurityUI() {
+  const user = getActiveUser();
+  if (!user) return;
+  const isProtected = !!(user.pin && user.pin.trim());
+
+  const titleEl = document.getElementById('profileSecurityUserName');
+  const badgeEl = document.getElementById('profileSecurityStatusBadge');
+  const descEl = document.getElementById('profileSecurityDesc');
+  const passInput = document.getElementById('profilePasswordInput');
+  const settingTitle = document.getElementById('settingProfileSecurityTitle');
+  const settingSub = document.getElementById('settingProfileSecuritySub');
+  const settingPill = document.getElementById('settingProfileSecurityPill');
+
+  if (titleEl) titleEl.textContent = `${user.username}'s Password`;
+  if (badgeEl) {
+    badgeEl.textContent = isProtected ? 'Protected 🔒' : 'No Password 🔓';
+    badgeEl.style.background = isProtected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
+    badgeEl.style.color = isProtected ? '#10b981' : '#f59e0b';
+  }
+  if (descEl) {
+    descEl.textContent = isProtected 
+      ? 'This profile is password protected. Enter a new password below to change it across devices.'
+      : 'No password set. Add a password below to secure this profile across all devices.';
+  }
+  if (passInput) {
+    passInput.value = '';
+    passInput.placeholder = isProtected ? 'Enter new password to change...' : 'Set password for this profile...';
+  }
+  if (settingTitle) settingTitle.textContent = `Profile Password (${user.username})`;
+  if (settingSub) settingSub.textContent = isProtected ? 'Password Protected • Tap to change' : 'No Password • Tap to add password';
+  if (settingPill) {
+    settingPill.textContent = isProtected ? 'Protected' : 'Set Password';
+    settingPill.style.color = isProtected ? '#10b981' : '#f59e0b';
+  }
+}
+
+function renderAccountsListModal() {
+  const container = document.getElementById('accountsListContainer');
+  if (!container) return;
+
+  container.innerHTML = '';
+  userState.users.forEach(u => {
+    const p = getUserStoragePrefix(u.id);
+    let uTasks = [];
+    try {
+      uTasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`) || '[]');
+    } catch(e) {
+      uTasks = [];
+    }
+    const activeTasksCount = uTasks.filter(t => !t.completed).length;
+    const isCurrent = (u.id === userState.currentUserId);
+    const initial = (u.username || 'U').charAt(0).toUpperCase();
+
+    const row = document.createElement('div');
+    row.className = `account-item-row ${isCurrent ? 'active' : ''}`;
+    row.innerHTML = `
+      <div class="account-left">
+        <div class="account-mini-avatar" style="background: ${u.avatarColor || '#6366f1'}">${initial}</div>
+        <div class="account-name-meta">
+          <div class="account-name-text">${escapeHtml(u.username)} ${u.pin ? '<i class="fa-solid fa-lock" style="font-size:0.7rem; color:var(--text-muted); margin-left:4px;" title="Password protected"></i>' : '<span style="font-size:0.65rem; color:#f59e0b; margin-left:4px;" title="No password set">🔓 No password</span>'}</div>
+          <div class="account-task-count">${activeTasksCount} active task${activeTasksCount === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+      <div class="account-actions">
+        ${isCurrent ? '<i class="fa-solid fa-circle-check account-active-badge"></i>' : ''}
+        ${userState.users.length > 1 ? `<button class="account-delete-btn" data-uid="${u.id}" title="Delete account"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+      </div>
+    `;
+
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.account-delete-btn')) return;
+      if (isCurrent) {
+        closeAuthModal();
+        return;
+      }
+      switchUser(u.id);
+    });
+
+    const delBtn = row.querySelector('.account-delete-btn');
+    if (delBtn) {
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteUser(u.id);
+      });
+    }
+
+    container.appendChild(row);
+  });
+}
+
+let pendingPinUser = null;
+
+function switchUser(targetUserId, inputPin = '') {
+  const targetUser = userState.users.find(u => u.id === targetUserId);
+  if (!targetUser) return;
+
+  // If user is PIN protected and inputPin does not match
+  if (targetUser.pin) {
+    if (!inputPin || inputPin !== targetUser.pin) {
+      pendingPinUser = targetUser;
+      openPinModal(targetUser);
+      return;
+    }
+  }
+
+  // 1. Cancel pending push timer to prevent cross-account sync pollution
+  if (syncState.pushTimer) {
+    clearTimeout(syncState.pushTimer);
+    syncState.pushTimer = null;
+  }
+
+  // 2. Save previous user state explicitly for previous user ONLY if tasks were loaded
+  const prevId = userState.currentUserId;
+  if (prevId && prevId !== targetUser.id && Array.isArray(appState.tasks) && appState.tasks.length > 0) {
+    saveStateForUser(prevId);
+  }
+
+  // 3. Set new active user
+  userState.currentUserId = targetUser.id;
+  safeStorageSet(USER_KEY_CURRENT, targetUser.id);
+  safeSessionSet('ios_reminders_session_user_id', targetUser.id);
+
+  // 4. Load target user's data
+  const p = getUserStoragePrefix(targetUser.id);
+  appState.tasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
+  appState.lists = JSON.parse(localStorage.getItem(`${p}lists_v2`)) || DEFAULT_LISTS;
+  appState.finishedHistory = JSON.parse(localStorage.getItem(`${p}history`)) || [];
+  appState.colorTheme = localStorage.getItem(`${p}palette`) || targetUser.themeClass || 'theme-indigo';
+  appState.settings = loadCurrentUserSettings();
+  appState.currentList = 'All Lists';
+  appState.searchQuery = '';
+
+  // 5. Update UI components
+  applyTheme(appState.colorTheme, false);
+  if (typeof updateSettingsUI === 'function') updateSettingsUI();
+  updateUserUI();
+  renderDrawerLists();
+  renderTasks();
+  closeAuthModal();
+  closePinModal();
+
+  if (typeof syncScheduledNotifications === 'function') {
+    syncScheduledNotifications();
+  }
+
+  showToast(`Switched to ${targetUser.username}`);
+
+  // 6. Instantly pull latest tasks from Cloudflare D1 strictly for the target user
+  cloudSyncPull(true, targetUser.id);
+}
+
+function createNewUser(username, pin = '', avatarColor = '#6366f1') {
+  const cleanName = (username || '').trim();
+  const cleanPin = (pin || '').trim();
+  if (!cleanName) {
+    showToast('Please enter a username');
+    return;
+  }
+  if (!cleanPin) {
+    showToast('Password is required for new profile creation', 'fa-triangle-exclamation');
+    const pinInput = document.getElementById('newUserPinInput');
+    if (pinInput) pinInput.focus();
+    return;
+  }
+  if (userState.users.some(u => u.username.toLowerCase() === cleanName.toLowerCase())) {
+    showToast('A user with this name already exists');
+    return;
+  }
+
+  const newUser = {
+    id: 'user_' + Date.now(),
+    username: cleanName,
+    avatarColor: avatarColor || '#6366f1',
+    pin: cleanPin,
+    createdAt: Date.now()
+  };
+
+  saveState();
+
+  // Initialize new user storage with default clean list
+  const p = `ios_reminders_u_${newUser.id}_`;
+  localStorage.setItem(`${p}tasks_v2`, '[]');
+  localStorage.setItem(`${p}lists_v2`, JSON.stringify(DEFAULT_LISTS));
+  localStorage.setItem(`${p}history`, '[]');
+  localStorage.setItem(`${p}palette`, 'theme-indigo');
+
+  userState.users.push(newUser);
+  localStorage.setItem(USER_KEY_USERS, JSON.stringify(userState.users));
+  syncProfilesPush();
+
+  switchUser(newUser.id, newUser.pin);
+
+  const nameInput = document.getElementById('newUsernameInput');
+  const pinInput = document.getElementById('newUserPinInput');
+  if (nameInput) nameInput.value = '';
+  if (pinInput) pinInput.value = '';
+}
+
+function deleteUser(userId) {
+  if (userState.users.length <= 1) {
+    showToast('Cannot delete the only account');
+    return;
+  }
+  const u = userState.users.find(x => x.id === userId);
+  if (!u) return;
+
+  if (!confirm(`Delete user "${u.username}" and all associated data?`)) {
+    return;
+  }
+
+  const p = getUserStoragePrefix(userId);
+  localStorage.removeItem(`${p}tasks_v2`);
+  localStorage.removeItem(`${p}lists_v2`);
+  localStorage.removeItem(`${p}history`);
+  localStorage.removeItem(`${p}palette`);
+  localStorage.removeItem(`${p}settings`);
+
+  userState.users = userState.users.filter(x => x.id !== userId);
+  localStorage.setItem(USER_KEY_USERS, JSON.stringify(userState.users));
+  syncProfilesPush();
+
+  if (userState.currentUserId === userId) {
+    switchUser(userState.users[0].id, userState.users[0].pin);
+  } else {
+    renderAccountsListModal();
+    updateUserUI();
+  }
+  showToast(`Deleted ${u.username}`);
+}
+
+function openAuthModal() {
+  const modal = document.getElementById('authModalBackdrop');
+  if (!modal) return;
+  updateUserUI();
+  renderAccountsListModal();
+  modal.style.display = 'flex';
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('authModalBackdrop');
+  if (modal) modal.style.display = 'none';
+}
+
+function openPinModal(targetUser) {
+  const modal = document.getElementById('pinModalBackdrop');
+  const title = document.getElementById('pinModalTitle');
+  const prompt = document.getElementById('pinPromptText');
+  const input = document.getElementById('pinVerifyInput');
+  const errorMsg = document.getElementById('pinErrorMsg');
+
+  if (!modal) return;
+  if (title) title.textContent = `Unlock ${targetUser.username}`;
+  if (prompt) prompt.textContent = `Enter the password for "${targetUser.username}" to access reminders.`;
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 150);
+  }
+  if (errorMsg) errorMsg.style.display = 'none';
+  modal.style.display = 'flex';
+}
+
+function closePinModal() {
+  const modal = document.getElementById('pinModalBackdrop');
+  if (modal) modal.style.display = 'none';
+  pendingPinUser = null;
+}
+
+// Attach User Events
+const topUserBtn = document.getElementById('topUserBtn');
+if (topUserBtn) {
+  topUserBtn.addEventListener('click', openAuthModal);
+}
+
+const drawerSwitchUserBtn = document.getElementById('drawerSwitchUserBtn');
+if (drawerSwitchUserBtn) {
+  drawerSwitchUserBtn.addEventListener('click', () => {
+    closeDrawer();
+    openAuthModal();
+  });
+}
+
+const closeAuthModalBtn = document.getElementById('closeAuthModalBtn');
+if (closeAuthModalBtn) {
+  closeAuthModalBtn.addEventListener('click', closeAuthModal);
+}
+
+const authModalBackdrop = document.getElementById('authModalBackdrop');
+if (authModalBackdrop) {
+  authModalBackdrop.addEventListener('click', (e) => {
+    if (e.target === authModalBackdrop) closeAuthModal();
+  });
+}
+
+const logoutBtn = document.getElementById('logoutBtn');
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', () => {
+    openAuthModal();
+  });
+}
+
+const createUserSubmitBtn = document.getElementById('createUserSubmitBtn');
+if (createUserSubmitBtn) {
+  createUserSubmitBtn.addEventListener('click', () => {
+    const nameInput = document.getElementById('newUsernameInput');
+    const pinInput = document.getElementById('newUserPinInput');
+    const name = nameInput ? nameInput.value : '';
+    const pin = pinInput ? pinInput.value : '';
+    createNewUser(name, pin, userState.selectedNewAvatarColor);
+  });
+}
+
+const newUsernameInput = document.getElementById('newUsernameInput');
+if (newUsernameInput) {
+  newUsernameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const pinInput = document.getElementById('newUserPinInput');
+      if (pinInput) pinInput.focus();
+    }
+  });
+}
+
+const newUserPinInput = document.getElementById('newUserPinInput');
+if (newUserPinInput) {
+  newUserPinInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && createUserSubmitBtn) createUserSubmitBtn.click();
+  });
+}
+
+// Active Profile Password Setting & Update
+const saveProfilePasswordBtn = document.getElementById('saveProfilePasswordBtn');
+const profilePasswordInput = document.getElementById('profilePasswordInput');
+if (saveProfilePasswordBtn) {
+  saveProfilePasswordBtn.addEventListener('click', async () => {
+    const user = getActiveUser();
+    if (!user) return;
+    const newPass = profilePasswordInput ? profilePasswordInput.value.trim() : '';
+    if (!newPass) {
+      showToast('Please enter a password', 'fa-triangle-exclamation');
+      if (profilePasswordInput) profilePasswordInput.focus();
+      return;
+    }
+
+    user.pin = newPass;
+    const idx = userState.users.findIndex(u => u.id === user.id);
+    if (idx !== -1) {
+      userState.users[idx].pin = newPass;
+    }
+
+    localStorage.setItem(USER_KEY_USERS, JSON.stringify(userState.users));
+    updateProfileSecurityUI();
+    renderAccountsListModal();
+    if (typeof renderLoginProfiles === 'function') renderLoginProfiles();
+
+    showToast('Saving password to Cloudflare...', 'fa-cloud-arrow-up');
+    try {
+      await syncProfilesPush();
+      showToast('Password updated & synced to Cloudflare!', 'fa-circle-check');
+    } catch (e) {
+      console.error('Error syncing profile password:', e);
+      showToast('Password saved locally', 'fa-circle-check');
+    }
+  });
+}
+
+if (profilePasswordInput) {
+  profilePasswordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && saveProfilePasswordBtn) {
+      saveProfilePasswordBtn.click();
+    }
+  });
+}
+
+const settingProfileSecurityRow = document.getElementById('settingProfileSecurityRow');
+if (settingProfileSecurityRow) {
+  settingProfileSecurityRow.addEventListener('click', () => {
+    openAuthModal();
+    const passInput = document.getElementById('profilePasswordInput');
+    if (passInput) {
+      setTimeout(() => passInput.focus(), 250);
+    }
+  });
+}
+
+// Avatar color options
+const avatarColorPicker = document.getElementById('avatarColorPicker');
+if (avatarColorPicker) {
+  avatarColorPicker.addEventListener('click', (e) => {
+    const dot = e.target.closest('.color-dot-opt');
+    if (!dot) return;
+    avatarColorPicker.querySelectorAll('.color-dot-opt').forEach(d => d.classList.remove('selected'));
+    dot.classList.add('selected');
+    userState.selectedNewAvatarColor = dot.getAttribute('data-color') || '#6366f1';
+  });
+}
+
+// PIN Modal buttons
+const closePinModalBtn = document.getElementById('closePinModalBtn');
+if (closePinModalBtn) closePinModalBtn.addEventListener('click', closePinModal);
+
+const cancelPinVerifyBtn = document.getElementById('cancelPinVerifyBtn');
+if (cancelPinVerifyBtn) cancelPinVerifyBtn.addEventListener('click', closePinModal);
+
+const submitPinVerifyBtn = document.getElementById('submitPinVerifyBtn');
+const pinVerifyInput = document.getElementById('pinVerifyInput');
+
+function handlePinSubmit() {
+  if (!pendingPinUser) return;
+  const pin = pinVerifyInput ? pinVerifyInput.value : '';
+  if (pin === pendingPinUser.pin) {
+    switchUser(pendingPinUser.id, pin);
+  } else {
+    const err = document.getElementById('pinErrorMsg');
+    if (err) err.style.display = 'block';
+    if (pinVerifyInput) {
+      pinVerifyInput.value = '';
+      pinVerifyInput.focus();
+    }
+  }
+}
+
+if (submitPinVerifyBtn) submitPinVerifyBtn.addEventListener('click', handlePinSubmit);
+if (pinVerifyInput) {
+  pinVerifyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handlePinSubmit();
+  });
+}
+
+// ================= LOGIN GATE SCREEN CONTROLLER =================
+const SESSION_AUTH_KEY = 'ios_reminders_session_user_id';
+
+const loginScreen = document.getElementById('loginScreen');
+const loginProfilesContainer = document.getElementById('loginProfilesContainer');
+const openCreateProfileBtn = document.getElementById('openCreateProfileBtn');
+const createProfileOverlay = document.getElementById('createProfileOverlay');
+const closeCreateProfileBtn = document.getElementById('closeCreateProfileBtn');
+const signupUsernameInput = document.getElementById('signupUsernameInput');
+const signupPinInput = document.getElementById('signupPinInput');
+const signupColorPicker = document.getElementById('signupColorPicker');
+const signupErrorText = document.getElementById('signupErrorText');
+const submitSignUpBtn = document.getElementById('submitSignUpBtn');
+
+// PIN Prompt Modal Elements
+const loginPinPromptOverlay = document.getElementById('loginPinPromptOverlay');
+const pinPromptTitle = document.getElementById('pinPromptTitle');
+const pinPromptSubtitle = document.getElementById('pinPromptSubtitle');
+const cardPinInput = document.getElementById('cardPinInput');
+const cardPinErrorText = document.getElementById('cardPinErrorText');
+const submitCardPinBtn = document.getElementById('submitCardPinBtn');
+const closePinPromptBtn = document.getElementById('closePinPromptBtn');
+
+const drawerLogoutBtn = document.getElementById('drawerLogoutBtn');
+
+let selectedSignupColor = '#0284c7';
+let selectedSignupTheme = 'theme-blue';
+let targetPinProfile = null;
+
+function showLoginGateScreen() {
+  if (tasksScreen) tasksScreen.classList.remove('active');
+  const newTaskScreen = document.getElementById('newTaskScreen');
+  if (newTaskScreen) newTaskScreen.classList.remove('active');
+  const settingsScreen = document.getElementById('settingsScreen');
+  if (settingsScreen) settingsScreen.classList.remove('active');
+  if (loginScreen) loginScreen.classList.add('active');
+
+  if (syncState.pushTimer) {
+    clearTimeout(syncState.pushTimer);
+    syncState.pushTimer = null;
+  }
+  appState.tasks = [];
+  userState.currentUserId = null;
+
+  renderLoginProfiles();
+}
+
+function showMainAppScreen(userId) {
+  if (loginScreen) loginScreen.classList.remove('active');
+  if (tasksScreen) tasksScreen.classList.add('active');
+  safeSessionSet(SESSION_AUTH_KEY, userId);
+
+  updateUserUI();
+  renderDrawerLists();
+  renderTasks();
+}
+
+function renderLoginProfiles() {
+  if (!loginProfilesContainer) return;
+  loginProfilesContainer.innerHTML = '';
+
+  const THEME_CYCLE = ['theme-blue', 'theme-purple', 'theme-emerald', 'theme-sunset', 'theme-amber'];
+
+  userState.users.forEach((u, idx) => {
+    const themeClass = u.themeClass || THEME_CYCLE[idx % THEME_CYCLE.length];
+    const initial = (u.username || 'U').charAt(0).toUpperCase();
+
+    const card = document.createElement('div');
+    card.className = `profile-card ${themeClass}`;
+    card.setAttribute('data-uid', u.id);
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+
+    card.innerHTML = `
+      <div class="profile-avatar-wrap">
+        <span>${initial}</span>
+      </div>
+      <div class="profile-card-name">${escapeHtml(u.username)} ${u.pin ? '<i class="fa-solid fa-lock" style="font-size:0.75rem; opacity:0.75; margin-left:4px;" title="Password protected"></i>' : ''}</div>
+      <div class="profile-arrow-btn" title="Enter profile">
+        <i class="fa-solid fa-arrow-right"></i>
+      </div>
+    `;
+
+    const handleCardSelection = (e) => {
+      if (e) e.preventDefault();
+      if (u.pin) {
+        openCardPinPrompt(u);
+      } else {
+        // Instant lag-free entry
+        switchUser(u.id, '');
+        showMainAppScreen(u.id);
+        showToast(`Welcome back, ${u.username}!`);
+      }
+    };
+
+    card.addEventListener('click', handleCardSelection);
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        handleCardSelection(e);
+      }
+    });
+
+    loginProfilesContainer.appendChild(card);
+  });
+}
+
+// PIN Prompt Handlers
+function openCardPinPrompt(user) {
+  targetPinProfile = user;
+  if (!loginPinPromptOverlay) return;
+  if (pinPromptTitle) pinPromptTitle.textContent = user.username;
+  if (pinPromptSubtitle) pinPromptSubtitle.textContent = `Enter password for ${user.username}`;
+  if (cardPinInput) {
+    cardPinInput.value = '';
+    setTimeout(() => cardPinInput.focus(), 120);
+  }
+  if (cardPinErrorText) cardPinErrorText.style.display = 'none';
+  loginPinPromptOverlay.style.display = 'flex';
+}
+
+function closeCardPinPrompt() {
+  if (loginPinPromptOverlay) loginPinPromptOverlay.style.display = 'none';
+  targetPinProfile = null;
+}
+
+if (closePinPromptBtn) closePinPromptBtn.addEventListener('click', closeCardPinPrompt);
+
+function handleCardPinSubmit() {
+  if (!targetPinProfile) return;
+  const pin = cardPinInput ? cardPinInput.value.trim() : '';
+  if (pin === targetPinProfile.pin) {
+    const uid = targetPinProfile.id;
+    const name = targetPinProfile.username;
+    closeCardPinPrompt();
+    switchUser(uid, pin);
+    showMainAppScreen(uid);
+    showToast(`Welcome back, ${name}!`);
+  } else {
+    if (cardPinErrorText) cardPinErrorText.style.display = 'block';
+    if (cardPinInput) {
+      cardPinInput.value = '';
+      cardPinInput.focus();
+    }
+  }
+}
+
+if (submitCardPinBtn) submitCardPinBtn.addEventListener('click', handleCardPinSubmit);
+if (cardPinInput) {
+  cardPinInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleCardPinSubmit();
+  });
+}
+
+// Create Profile Handlers
+if (openCreateProfileBtn) {
+  openCreateProfileBtn.addEventListener('click', () => {
+    if (createProfileOverlay) {
+      if (signupUsernameInput) {
+        signupUsernameInput.value = '';
+        setTimeout(() => signupUsernameInput.focus(), 120);
+      }
+      if (signupPinInput) signupPinInput.value = '';
+      if (signupErrorText) signupErrorText.style.display = 'none';
+      createProfileOverlay.style.display = 'flex';
+    }
+  });
+}
+
+if (closeCreateProfileBtn) {
+  closeCreateProfileBtn.addEventListener('click', () => {
+    if (createProfileOverlay) createProfileOverlay.style.display = 'none';
+  });
+}
+
+// Color Picker selection
+if (signupColorPicker) {
+  signupColorPicker.addEventListener('click', (e) => {
+    const dot = e.target.closest('.color-dot-opt');
+    if (!dot) return;
+    signupColorPicker.querySelectorAll('.color-dot-opt').forEach(d => d.classList.remove('selected'));
+    dot.classList.add('selected');
+    selectedSignupColor = dot.getAttribute('data-color') || '#0284c7';
+    selectedSignupTheme = dot.getAttribute('data-theme') || 'theme-blue';
+  });
+}
+
+// Submit Create User
+if (submitSignUpBtn) {
+  submitSignUpBtn.addEventListener('click', () => {
+    const name = signupUsernameInput ? signupUsernameInput.value.trim() : '';
+    const pin = signupPinInput ? signupPinInput.value.trim() : '';
+
+    if (!name) {
+      if (signupErrorText) {
+        signupErrorText.textContent = 'Please enter a name';
+        signupErrorText.style.display = 'block';
+      }
+      if (signupUsernameInput) signupUsernameInput.focus();
+      return;
+    }
+
+    if (!pin) {
+      if (signupErrorText) {
+        signupErrorText.textContent = 'Password is required to create a new profile';
+        signupErrorText.style.display = 'block';
+      }
+      if (signupPinInput) signupPinInput.focus();
+      return;
+    }
+
+    if (userState.users.some(u => u.username.toLowerCase() === name.toLowerCase())) {
+      if (signupErrorText) {
+        signupErrorText.textContent = 'A profile with this name already exists';
+        signupErrorText.style.display = 'block';
+      }
+      return;
+    }
+
+    if (signupErrorText) signupErrorText.style.display = 'none';
+
+    // Create user with selected theme
+    const newUser = {
+      id: 'user_' + Date.now(),
+      username: name,
+      avatarColor: selectedSignupColor,
+      themeClass: selectedSignupTheme,
+      pin: pin,
+      createdAt: Date.now()
+    };
+
+    saveState();
+
+    const p = `ios_reminders_u_${newUser.id}_`;
+    localStorage.setItem(`${p}tasks_v2`, '[]');
+    localStorage.setItem(`${p}lists_v2`, JSON.stringify(DEFAULT_LISTS));
+    localStorage.setItem(`${p}history`, '[]');
+    localStorage.setItem(`${p}palette`, 'theme-indigo');
+
+    userState.users.push(newUser);
+    localStorage.setItem(USER_KEY_USERS, JSON.stringify(userState.users));
+    syncProfilesPush();
+
+    if (createProfileOverlay) createProfileOverlay.style.display = 'none';
+
+    switchUser(newUser.id, newUser.pin);
+    showMainAppScreen(newUser.id);
+    showToast(`Welcome, ${name}!`);
+  });
+}
+
+if (signupUsernameInput) {
+  signupUsernameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      if (signupPinInput) signupPinInput.focus();
+    }
+  });
+}
+
+if (signupPinInput) {
+  signupPinInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && submitSignUpBtn) submitSignUpBtn.click();
+  });
+}
+
+// Global Log Out function
+function logoutUser() {
+  if (syncState.pushTimer) {
+    clearTimeout(syncState.pushTimer);
+    syncState.pushTimer = null;
+  }
+  if (userState.currentUserId) {
+    saveStateForUser(userState.currentUserId);
+  }
+  safeSessionRemove(SESSION_AUTH_KEY);
+  safeStorageRemove(USER_KEY_CURRENT);
+  userState.currentUserId = null;
+  appState.tasks = [];
+  appState.lists = DEFAULT_LISTS;
+  appState.finishedHistory = [];
+  if (typeof closeDrawer === 'function') closeDrawer();
+  closeAuthModal();
+  showLoginGateScreen();
+  showToast('Logged out');
+}
+
+if (drawerLogoutBtn) {
+  drawerLogoutBtn.addEventListener('click', logoutUser);
+}
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', logoutUser);
+}
+
 // ================= INITIAL RENDER =================
-renderTasks();
+syncProfilesPull();
+
+const existingSessionUser = safeSessionGet(SESSION_AUTH_KEY);
+if (existingSessionUser && userState.users.some(u => u.id === existingSessionUser)) {
+  showMainAppScreen(existingSessionUser);
+} else {
+  // Always require login first when opening website!
+  showLoginGateScreen();
+}
 
 // Register Service Worker for offline capability
 if ('serviceWorker' in navigator) {
@@ -1122,8 +2490,9 @@ const settingClearLogRow = document.getElementById('settingClearLogRow');
 const settingClearAllTasksRow = document.getElementById('settingClearAllTasksRow');
 
 // Load settings preferences from storage or defaults
-if (!appState.settings) {
-  appState.settings = JSON.parse(localStorage.getItem('ios_reminders_settings')) || {
+function loadCurrentUserSettings() {
+  const p = getUserStoragePrefix();
+  return JSON.parse(localStorage.getItem(`${p}settings`)) || JSON.parse(localStorage.getItem('ios_reminders_settings')) || {
     timeFormat: '12-hour',
     firstDayOfWeek: 'Sunday',
     sortOrder: 'Due date + Alphabetically',
@@ -1136,8 +2505,13 @@ if (!appState.settings) {
   };
 }
 
+if (!appState.settings) {
+  appState.settings = loadCurrentUserSettings();
+}
+
 function saveSettings() {
-  localStorage.setItem('ios_reminders_settings', JSON.stringify(appState.settings));
+  const p = getUserStoragePrefix();
+  localStorage.setItem(`${p}settings`, JSON.stringify(appState.settings));
 }
 
 const THEME_NAMES = {
@@ -1551,7 +2925,7 @@ async function requestNotificationPermissions() {
     try {
       await initNotificationChannel();
       const status = await ln.requestPermissions();
-      if (status.display === 'granted') {
+      if (status && status.display === 'granted') {
         return true;
       }
     } catch (e) {
@@ -1559,11 +2933,27 @@ async function requestNotificationPermissions() {
     }
   }
 
-  if ('Notification' in window) {
+  // Web Notification API (safely compatible with iOS Safari & modern browsers)
+  if (typeof window !== 'undefined' && 'Notification' in window) {
     try {
-      const res = await Notification.requestPermission();
-      return res === 'granted';
-    } catch (e) {}
+      if (Notification.permission === 'granted') return true;
+      if (Notification.permission === 'denied') return false;
+
+      return await new Promise((resolve) => {
+        try {
+          const res = Notification.requestPermission((p) => {
+            resolve(p === 'granted');
+          });
+          if (res && typeof res.then === 'function') {
+            res.then((p) => resolve(p === 'granted')).catch(() => resolve(false));
+          }
+        } catch (err) {
+          resolve(false);
+        }
+      });
+    } catch (e) {
+      return false;
+    }
   }
   return false;
 }
@@ -1736,8 +3126,10 @@ if (settingTestNotifRow) {
 
 // Initialize notification system
 setTimeout(() => {
-  requestNotificationPermissions();
-  syncScheduledNotifications();
+  // Sync scheduled native notifications without triggering unprompted browser permission prompt
+  if (typeof syncScheduledNotifications === 'function') {
+    syncScheduledNotifications();
+  }
 }, 1000);
 
 // Check for newly crossed task times every 5 seconds for instant notification when time hits
@@ -1750,6 +3142,75 @@ if (localNotificationsPlugin) {
     const taskId = notification.notification?.extra?.taskId;
     if (taskId) {
       openEditTaskView(taskId);
+    }
+  });
+}
+
+// ================= CLOUD SYNC EVENT TRIGGERS =================
+// 1. Sync on window / tab focus (e.g. switching between mobile and laptop)
+window.addEventListener('focus', () => {
+  cloudSyncPull();
+});
+
+// 2. Sync on visibility change
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    cloudSyncPull();
+  }
+});
+
+// 3. Sync when device regains network connectivity
+window.addEventListener('online', () => {
+  cloudSyncPull(true);
+});
+
+// 4. Periodic background sync every 10 seconds when visible
+setInterval(() => {
+  if (document.visibilityState === 'visible') {
+    cloudSyncPull();
+  }
+}, 10000);
+
+// 5. Header Sync Button Click
+const cloudSyncStatusBtn = document.getElementById('cloudSyncStatusBtn');
+if (cloudSyncStatusBtn) {
+  cloudSyncStatusBtn.addEventListener('click', async () => {
+    showToast('☁️ Syncing with Cloudflare D1...', 'fa-arrows-rotate');
+    await cloudSyncPull(true);
+    showToast('✅ Cloud Database Synced!', 'fa-cloud-check');
+  });
+}
+
+// 6. Settings Cloud Sync & Diagnostics Row Listeners
+const settingSyncNowRow = document.getElementById('settingSyncNowRow');
+if (settingSyncNowRow) {
+  settingSyncNowRow.addEventListener('click', async () => {
+    showToast('☁️ Syncing with Cloudflare D1...', 'fa-arrows-rotate');
+    await cloudSyncPull(true);
+    showToast('✅ Cloud Database Synced!', 'fa-cloud-check');
+  });
+}
+
+const settingDbDiagRow = document.getElementById('settingDbDiagRow');
+if (settingDbDiagRow) {
+  settingDbDiagRow.addEventListener('click', async () => {
+    const t0 = performance.now();
+    try {
+      showToast('Testing database latency...', 'fa-server');
+      const resp = await fetch(`${CLOUD_API_BASE}/api/health`, { cache: 'no-store' });
+      const lat = Math.round(performance.now() - t0);
+      if (resp.ok) {
+        const data = await resp.json();
+        const diagSub = document.getElementById('settingDbDiagSub');
+        if (diagSub) {
+          diagSub.textContent = `Latency: ${lat}ms • D1: emi-reminder-db • Records: ${data.recordsCount}`;
+        }
+        showToast(`⚡ DB Online: ${lat}ms (${data.recordsCount} records)`, 'fa-check');
+      } else {
+        showToast('⚠️ DB responded with error', 'fa-triangle-exclamation');
+      }
+    } catch (err) {
+      showToast('❌ DB connection failed', 'fa-triangle-exclamation');
     }
   });
 }
