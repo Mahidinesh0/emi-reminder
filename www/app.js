@@ -184,28 +184,6 @@ function initUsersSystem() {
     localStorage.setItem(USER_KEY_CURRENT, currentId);
   }
 
-  // Self-healing migration: If Ben has any tasks, transfer them to Mahi and clear Ben
-  const benPrefix = `ios_reminders_u_user_ben_`;
-  const mahiPrefix = `ios_reminders_u_user_mahi_`;
-  try {
-    const benTasks = JSON.parse(localStorage.getItem(`${benPrefix}tasks_v2`) || '[]');
-    let mahiTasks = JSON.parse(localStorage.getItem(`${mahiPrefix}tasks_v2`) || '[]');
-
-    if (Array.isArray(benTasks) && benTasks.length > 0) {
-      benTasks.forEach(bt => {
-        if (!mahiTasks.some(mt => mt.id === bt.id || mt.title === bt.title)) {
-          mahiTasks.unshift(bt);
-        }
-      });
-      localStorage.setItem(`${mahiPrefix}tasks_v2`, JSON.stringify(mahiTasks));
-      localStorage.setItem(`${mahiPrefix}updated_at`, String(Date.now()));
-    }
-    // Always clear Ben's tasks so Ben starts clean
-    localStorage.setItem(`${benPrefix}tasks_v2`, '[]');
-    localStorage.setItem(`${benPrefix}history`, '[]');
-    localStorage.setItem(`${benPrefix}updated_at`, String(Date.now()));
-  } catch(e) {}
-
   // Ensure themeClass exists on all profiles
   const THEME_CYCLE = ['theme-blue', 'theme-purple', 'theme-emerald', 'theme-sunset', 'theme-amber'];
   storedUsers.forEach((u, idx) => {
@@ -351,6 +329,14 @@ function scheduleCloudSyncPush(targetUserId) {
   const p = getUserStoragePrefix(uid);
   const user = userState.users.find(u => u.id === uid);
   if (!user) return;
+
+  const localTasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
+  // Safety guard: if local tasks array is empty, do NOT schedule push until confirmed by explicit user action
+  // to prevent accidental overwrite of remote cloud database!
+  if (!localTasks || localTasks.length === 0) {
+    console.warn(`Prevented push for user ${uid}: local tasks array is empty`);
+    return;
+  }
 
   const payload = {
     userId: user.id,
