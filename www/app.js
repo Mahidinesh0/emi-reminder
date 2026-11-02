@@ -109,7 +109,9 @@ function safeParseDate(val) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// ================= DATA & STATE =================
+// ================= STORAGE & OFFLINE CONFIGURATION =================
+// Standalone iOS app is 100% local storage only - no cloud database dependencies
+const IS_LOCAL_STORAGE_MODE = true;
 const DEFAULT_LISTS = ['Default', 'Personal', 'Shopping', 'Wishlist', 'Work'];
 const INITIAL_TASKS = [];
 
@@ -255,7 +257,9 @@ function saveState() {
   const activeId = userState.currentUserId;
   if (!activeId) return;
   saveStateForUser(activeId);
-  scheduleCloudSyncPush(activeId);
+  if (!IS_LOCAL_STORAGE_MODE) {
+    scheduleCloudSyncPush(activeId);
+  }
 }
 
 // ================= CLOUDFLARE D1 CLOUD SYNC ENGINE =================
@@ -272,6 +276,28 @@ let syncState = {
 };
 
 function setSyncStatus(status) {
+  if (IS_LOCAL_STORAGE_MODE) {
+    const statusBtn = document.getElementById('cloudSyncStatusBtn');
+    const statusIcon = document.getElementById('syncStatusIcon');
+    const drawerStatus = document.getElementById('drawerDbStatus');
+    const settingsStatusBadge = document.getElementById('settingSyncBadge');
+    if (statusBtn) {
+      statusBtn.className = 'icon-btn sync-indicator-btn synced';
+      statusBtn.title = 'Offline Local Storage (Private on Device)';
+    }
+    if (statusIcon) {
+      statusIcon.className = 'fa-solid fa-hard-drive';
+      statusIcon.style.color = '#10b981';
+    }
+    if (drawerStatus) {
+      drawerStatus.innerHTML = '<i class="fa-solid fa-hard-drive" style="color: #10b981;"></i> Local Storage (Offline)';
+    }
+    if (settingsStatusBadge) {
+      settingsStatusBadge.textContent = 'Device Local';
+      settingsStatusBadge.style.color = '#10b981';
+    }
+    return;
+  }
   syncState.status = status;
   const statusBtn = document.getElementById('cloudSyncStatusBtn');
   const statusIcon = document.getElementById('syncStatusIcon');
@@ -323,6 +349,7 @@ function setSyncStatus(status) {
 }
 
 function scheduleCloudSyncPush(targetUserId) {
+  if (IS_LOCAL_STORAGE_MODE) return;
   const uid = targetUserId || userState.currentUserId;
   if (!uid) return;
 
@@ -387,6 +414,10 @@ async function cloudSyncPushPayload(payload) {
 }
 
 async function cloudSyncPull(force = false, expectedUserId = null) {
+  if (IS_LOCAL_STORAGE_MODE) {
+    setSyncStatus('synced');
+    return;
+  }
   if (syncState.isPulling) return;
   const currentUid = expectedUserId || userState.currentUserId;
   if (!currentUid) return;
@@ -561,6 +592,7 @@ async function cloudSyncPull(force = false, expectedUserId = null) {
 }
 
 async function syncProfilesPull() {
+  if (IS_LOCAL_STORAGE_MODE) return;
   try {
     const resp = await fetch(`${CLOUD_API_BASE}/api/sync?userId=__profiles__`, { cache: 'no-store' });
     if (!resp.ok) return;
@@ -602,6 +634,7 @@ async function syncProfilesPull() {
 }
 
 async function syncProfilesPush() {
+  if (IS_LOCAL_STORAGE_MODE) return;
   try {
     await fetch(`${CLOUD_API_BASE}/api/sync`, {
       method: 'POST',
@@ -3220,6 +3253,10 @@ setInterval(() => {
 const cloudSyncStatusBtn = document.getElementById('cloudSyncStatusBtn');
 if (cloudSyncStatusBtn) {
   cloudSyncStatusBtn.addEventListener('click', async () => {
+    if (IS_LOCAL_STORAGE_MODE) {
+      showToast('💾 Saved 100% locally on your iPhone', 'fa-hard-drive');
+      return;
+    }
     showToast('☁️ Syncing with Cloudflare D1...', 'fa-arrows-rotate');
     await cloudSyncPull(true);
     showToast('✅ Cloud Database Synced!', 'fa-cloud-check');
@@ -3230,6 +3267,10 @@ if (cloudSyncStatusBtn) {
 const settingSyncNowRow = document.getElementById('settingSyncNowRow');
 if (settingSyncNowRow) {
   settingSyncNowRow.addEventListener('click', async () => {
+    if (IS_LOCAL_STORAGE_MODE) {
+      showToast('💾 100% Local Storage - No cloud sync active', 'fa-hard-drive');
+      return;
+    }
     showToast('☁️ Syncing with Cloudflare D1...', 'fa-arrows-rotate');
     await cloudSyncPull(true);
     showToast('✅ Cloud Database Synced!', 'fa-cloud-check');
@@ -3239,6 +3280,14 @@ if (settingSyncNowRow) {
 const settingDbDiagRow = document.getElementById('settingDbDiagRow');
 if (settingDbDiagRow) {
   settingDbDiagRow.addEventListener('click', async () => {
+    if (IS_LOCAL_STORAGE_MODE) {
+      const diagSub = document.getElementById('settingDbDiagSub');
+      if (diagSub) {
+        diagSub.textContent = `Mode: Offline Local Storage (Device Private)`;
+      }
+      showToast('💾 All data securely stored on device', 'fa-check');
+      return;
+    }
     const t0 = performance.now();
     try {
       showToast('Testing database latency...', 'fa-server');

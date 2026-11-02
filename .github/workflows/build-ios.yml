@@ -2,7 +2,7 @@ name: Build iOS App
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, ios-offline-standalone ]
   workflow_dispatch:
 
 permissions:
