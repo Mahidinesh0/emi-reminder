@@ -215,6 +215,8 @@ function getActiveUser() {
 }
 
 const initialPrefix = getUserStoragePrefix();
+const initialDeletedTaskIds = safeJsonParse(safeStorageGet(`${initialPrefix}deleted_tasks`), []);
+let deletedTaskIds = Array.isArray(initialDeletedTaskIds) ? initialDeletedTaskIds : [];
 let appState = {
   tasks: safeJsonParse(safeStorageGet(`${initialPrefix}tasks_v2`), []),
   lists: safeJsonParse(safeStorageGet(`${initialPrefix}lists_v2`), DEFAULT_LISTS),
@@ -230,12 +232,16 @@ function saveStateForUser(uid) {
   if (!targetId) return;
 
   const p = getUserStoragePrefix(targetId);
-  const now = Date.now();
+  const previousUpdatedAt = Number(localStorage.getItem(`${p}updated_at`)) || 0;
+  const now = Math.max(Date.now(), previousUpdatedAt + 1);
   localStorage.setItem(`${p}tasks_v2`, JSON.stringify(appState.tasks));
   localStorage.setItem(`${p}lists_v2`, JSON.stringify(appState.lists));
   localStorage.setItem(`${p}history`, JSON.stringify(appState.finishedHistory));
   localStorage.setItem(`${p}palette`, appState.colorTheme);
   localStorage.setItem(`${p}updated_at`, String(now));
+  if (targetId === userState.currentUserId) {
+    localStorage.setItem(`${p}deleted_tasks`, JSON.stringify(deletedTaskIds));
+  }
   appState.lastUpdatedAt = now;
   if (appState.settings) {
     localStorage.setItem(`${p}settings`, JSON.stringify(appState.settings));
@@ -330,20 +336,13 @@ function scheduleCloudSyncPush(targetUserId) {
   const user = userState.users.find(u => u.id === uid);
   if (!user) return;
 
-  const localTasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
-  // Safety guard: if local tasks array is empty, do NOT schedule push until confirmed by explicit user action
-  // to prevent accidental overwrite of remote cloud database!
-  if (!localTasks || localTasks.length === 0) {
-    console.warn(`Prevented push for user ${uid}: local tasks array is empty`);
-    return;
-  }
-
   const payload = {
     userId: user.id,
     username: user.username,
     updatedAt: Number(localStorage.getItem(`${p}updated_at`)) || Date.now(),
     data: {
       tasks: JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [],
+      deletedTaskIds: safeJsonParse(localStorage.getItem(`${p}deleted_tasks`), []),
       lists: JSON.parse(localStorage.getItem(`${p}lists_v2`)) || DEFAULT_LISTS,
       finishedHistory: JSON.parse(localStorage.getItem(`${p}history`)) || [],
       colorTheme: localStorage.getItem(`${p}palette`) || user.themeClass || 'theme-indigo',
@@ -395,6 +394,14 @@ async function cloudSyncPull(force = false, expectedUserId = null) {
   const user = userState.users.find(u => u.id === currentUid);
   if (!user) return;
 
+  const p = getUserStoragePrefix(currentUid);
+  const makeLocalSnapshot = () => JSON.stringify([
+    safeStorageGet(`${p}updated_at`, '0'),
+    safeStorageGet(`${p}tasks_v2`, '[]'),
+    safeStorageGet(`${p}deleted_tasks`, '[]')
+  ]);
+  const requestLocalSnapshot = makeLocalSnapshot();
+
   syncState.isPulling = true;
   setSyncStatus('syncing');
 
@@ -421,12 +428,18 @@ async function cloudSyncPull(force = false, expectedUserId = null) {
       return;
     }
 
-    const p = getUserStoragePrefix(currentUid);
+    if (makeLocalSnapshot() !== requestLocalSnapshot) {
+      // A local change landed while this pull was in flight; keep it and upload it.
+      scheduleCloudSyncPush(currentUid);
+      setSyncStatus('synced');
+      return;
+    }
 
     if (!result.found) {
-      // No remote record yet for this user: push strictly this user's local tasks if any
-      const userLocalTasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
-      if (userLocalTasks.length > 0) {
+      const userLocalTasks = safeJsonParse(localStorage.getItem(`${p}tasks_v2`), []);
+      const userDeletedTaskIds = safeJsonParse(localStorage.getItem(`${p}deleted_tasks`), []);
+      const localUpdatedAt = Number(localStorage.getItem(`${p}updated_at`)) || 0;
+      if (userLocalTasks.length > 0 || userDeletedTaskIds.length > 0 || localUpdatedAt > 0) {
         scheduleCloudSyncPush(currentUid);
       } else {
         setSyncStatus('synced');
@@ -436,17 +449,29 @@ async function cloudSyncPull(force = false, expectedUserId = null) {
     }
 
     const remoteData = result.data;
+    if (!remoteData || typeof remoteData !== 'object' || !Array.isArray(remoteData.tasks)) {
+      console.warn('Cloud sync returned malformed task data; keeping local state.');
+      setSyncStatus('offline');
+      return;
+    }
     const remoteUpdatedAt = Number(result.updatedAt) || 0;
     const localUpdatedAt = Number(localStorage.getItem(`${p}updated_at`)) || 0;
-    const userLocalTasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
-    const hasRemoteTasks = remoteData && Array.isArray(remoteData.tasks) && remoteData.tasks.length > 0;
-    const hasLocalTasks = userLocalTasks.length > 0;
+    const userLocalTasks = safeJsonParse(localStorage.getItem(`${p}tasks_v2`), []);
+    const storedDeletedTaskIds = safeJsonParse(localStorage.getItem(`${p}deleted_tasks`), []);
+    const localDeletedTaskIds = Array.isArray(storedDeletedTaskIds) ? storedDeletedTaskIds : [];
 
-    // Safety guard: if local has no tasks but remote has tasks, ALWAYS adopt remote tasks!
-    if (force || remoteUpdatedAt >= localUpdatedAt || (!hasLocalTasks && hasRemoteTasks)) {
+    // Keep deletion markers from either device and exclude those tasks before rendering.
+    const remoteDeletedTaskIds = Array.isArray(remoteData.deletedTaskIds) ? remoteData.deletedTaskIds : [];
+    const mergedDeletedTaskIds = Array.from(new Set([...remoteDeletedTaskIds, ...localDeletedTaskIds].map(String)));
+    const deletedIdSet = new Set(mergedDeletedTaskIds);
+    const remoteTasks = Array.isArray(remoteData.tasks) ? remoteData.tasks : [];
+
+    if (remoteUpdatedAt > localUpdatedAt) {
       if (remoteData) {
-        const freshLocalTasks = userLocalTasks.filter(t => (t.createdAt || 0) > remoteUpdatedAt);
-        const mergedTasks = [...(remoteData.tasks || [])];
+        const freshLocalTasks = userLocalTasks.filter(t =>
+          (t.createdAt || 0) > remoteUpdatedAt && !deletedIdSet.has(String(t.id))
+        );
+        const mergedTasks = remoteTasks.filter(t => !deletedIdSet.has(String(t.id)));
         freshLocalTasks.forEach(lt => {
           if (!mergedTasks.some(mt => mt.id === lt.id)) {
             mergedTasks.unshift(lt);
@@ -456,6 +481,7 @@ async function cloudSyncPull(force = false, expectedUserId = null) {
         // Update active appState ONLY if this user is still the active user
         if (userState.currentUserId === currentUid) {
           appState.tasks = mergedTasks;
+          deletedTaskIds = mergedDeletedTaskIds;
           if (Array.isArray(remoteData.lists) && remoteData.lists.length) {
             appState.lists = Array.from(new Set([...DEFAULT_LISTS, ...remoteData.lists]));
           }
@@ -477,8 +503,12 @@ async function cloudSyncPull(force = false, expectedUserId = null) {
           }
         }
 
-        const newLatest = Math.max(remoteUpdatedAt, Date.now());
+        const remoteDeletedSet = new Set(remoteDeletedTaskIds.map(String));
+        const needsUpload = mergedTasks.length !== remoteTasks.length ||
+          mergedDeletedTaskIds.some(id => !remoteDeletedSet.has(id));
+        const newLatest = remoteUpdatedAt;
         localStorage.setItem(`${p}tasks_v2`, JSON.stringify(mergedTasks));
+        localStorage.setItem(`${p}deleted_tasks`, JSON.stringify(mergedDeletedTaskIds));
         localStorage.setItem(`${p}lists_v2`, JSON.stringify(remoteData.lists || DEFAULT_LISTS));
         localStorage.setItem(`${p}history`, JSON.stringify(remoteData.finishedHistory || []));
         if (remoteData.colorTheme) localStorage.setItem(`${p}palette`, remoteData.colorTheme);
@@ -491,15 +521,34 @@ async function cloudSyncPull(force = false, expectedUserId = null) {
             syncScheduledNotifications();
           }
         }
+        if (needsUpload) scheduleCloudSyncPush(currentUid);
       }
     } else if (localUpdatedAt > remoteUpdatedAt) {
-      // NEVER overwrite remote tasks if local is empty and remote has tasks!
-      if (!hasLocalTasks && hasRemoteTasks) {
-        console.warn('Blocked cloud push: local is empty while remote has tasks. Pulling remote instead.');
-        cloudSyncPull(true, currentUid);
-        return;
+      // A newer local clock alone does not prove that a missing task was
+      // intentionally deleted. Only a tombstone authorizes deletion; recover
+      // remote tasks that this device's local snapshot never received.
+      const localTaskIds = new Set(userLocalTasks
+        .filter(task => task && task.id != null)
+        .map(task => String(task.id)));
+      const missingRemoteTasks = remoteTasks.filter(task =>
+        task && task.id != null &&
+        !deletedIdSet.has(String(task.id)) &&
+        !localTaskIds.has(String(task.id))
+      );
+
+      if (missingRemoteTasks.length > 0) {
+        const mergedTasks = [...userLocalTasks, ...missingRemoteTasks];
+        localStorage.setItem(`${p}tasks_v2`, JSON.stringify(mergedTasks));
+        if (userState.currentUserId === currentUid) {
+          appState.tasks = mergedTasks;
+          if (typeof renderTasks === 'function') renderTasks();
+          if (typeof renderDrawerLists === 'function') renderDrawerLists();
+        }
+        scheduleCloudSyncPush(currentUid);
+      } else {
+        // Local tombstones still allow intentional delete-all to sync.
+        scheduleCloudSyncPush(currentUid);
       }
-      scheduleCloudSyncPush(currentUid);
     }
 
     setSyncStatus('synced');
@@ -1464,7 +1513,8 @@ if (saveTaskBtn) {
         dueDate: dueDateISO,
         list: selectedList,
         repeat: repeatVal,
-        completed: false
+        completed: false,
+        createdAt: Date.now()
       };
 
       appState.tasks.unshift(newTask);
@@ -1490,6 +1540,8 @@ if (deleteTaskBtn) {
     const taskIndex = appState.tasks.findIndex(t => String(t.id) === String(editingTaskId));
     if (taskIndex !== -1) {
       const removed = appState.tasks.splice(taskIndex, 1)[0];
+      const removedId = String(removed.id);
+      if (!deletedTaskIds.includes(removedId)) deletedTaskIds.push(removedId);
       saveState();
       playSound('pop');
       showToast(`Deleted "${removed.title}"`, 'fa-trash');
@@ -1829,6 +1881,8 @@ function switchUser(targetUserId, inputPin = '') {
   // 4. Load target user's data
   const p = getUserStoragePrefix(targetUser.id);
   appState.tasks = JSON.parse(localStorage.getItem(`${p}tasks_v2`)) || [];
+  const targetDeletedTaskIds = safeJsonParse(localStorage.getItem(`${p}deleted_tasks`), []);
+  deletedTaskIds = Array.isArray(targetDeletedTaskIds) ? targetDeletedTaskIds : [];
   appState.lists = JSON.parse(localStorage.getItem(`${p}lists_v2`)) || DEFAULT_LISTS;
   appState.finishedHistory = JSON.parse(localStorage.getItem(`${p}history`)) || [];
   appState.colorTheme = localStorage.getItem(`${p}palette`) || targetUser.themeClass || 'theme-indigo';
@@ -1916,6 +1970,7 @@ function deleteUser(userId) {
 
   const p = getUserStoragePrefix(userId);
   localStorage.removeItem(`${p}tasks_v2`);
+  localStorage.removeItem(`${p}deleted_tasks`);
   localStorage.removeItem(`${p}lists_v2`);
   localStorage.removeItem(`${p}history`);
   localStorage.removeItem(`${p}palette`);
@@ -2186,6 +2241,7 @@ function showMainAppScreen(userId) {
   updateUserUI();
   renderDrawerLists();
   renderTasks();
+  cloudSyncPull(false, userId);
 }
 
 function renderLoginProfiles() {
@@ -2808,6 +2864,8 @@ if (settingImportFileInput) {
         const imported = JSON.parse(event.target.result);
         if (Array.isArray(imported.tasks)) {
           appState.tasks = imported.tasks;
+          const importedTaskIds = new Set(imported.tasks.map(t => String(t.id)));
+          deletedTaskIds = deletedTaskIds.filter(id => !importedTaskIds.has(String(id)));
           if (Array.isArray(imported.lists)) appState.lists = imported.lists;
           if (Array.isArray(imported.finishedHistory)) appState.finishedHistory = imported.finishedHistory;
           if (imported.colorTheme) applyTheme(imported.colorTheme);
@@ -2850,6 +2908,7 @@ if (settingClearLogRow) {
 if (settingClearAllTasksRow) {
   settingClearAllTasksRow.addEventListener('click', () => {
     if (confirm('Delete all tasks and reminders?')) {
+      deletedTaskIds = Array.from(new Set([...deletedTaskIds, ...appState.tasks.map(t => String(t.id))]));
       appState.tasks = [];
       appState.finishedHistory = [];
       saveState();

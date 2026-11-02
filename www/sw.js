@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-reminders-v20261028_fix_v2';
+const CACHE_NAME = 'todo-reminders-v20261102_sync_fix_v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

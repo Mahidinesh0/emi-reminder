@@ -98,12 +98,13 @@ export async function onRequestPost(context) {
     }
 
     const now = Number(updatedAt) || Date.now();
-    const dataString = typeof data === 'string' ? data : JSON.stringify(data);
     const uName = username || userId;
 
-    // Check existing record to avoid overwriting with older data
+    // Load the existing snapshot so a stale/empty device cannot erase tasks it
+    // has never seen. Deletions are authoritative only when represented by a
+    // task tombstone sent by the client.
     const existing = await context.env.DB.prepare(
-      'SELECT updated_at FROM user_sync WHERE user_id = ?'
+      'SELECT updated_at, data FROM user_sync WHERE user_id = ?'
     ).bind(userId).first();
 
     if (existing && existing.updated_at && existing.updated_at > now) {
@@ -118,6 +119,52 @@ export async function onRequestPost(context) {
         headers: corsHeaders
       });
     }
+
+    let incomingData = data;
+    let existingData = null;
+    try {
+      if (typeof incomingData === 'string') incomingData = JSON.parse(incomingData);
+    } catch (_) {
+      incomingData = null;
+    }
+    try {
+      existingData = existing && existing.data ? JSON.parse(existing.data) : null;
+    } catch (_) {
+      existingData = null;
+    }
+
+    if (incomingData && !Array.isArray(incomingData) && Array.isArray(incomingData.tasks) &&
+        existingData && !Array.isArray(existingData) && Array.isArray(existingData.tasks)) {
+      const tombstones = new Set([
+        ...(Array.isArray(existingData.deletedTaskIds) ? existingData.deletedTaskIds : []),
+        ...(Array.isArray(incomingData.deletedTaskIds) ? incomingData.deletedTaskIds : [])
+      ].map(String));
+      const mergedById = new Map();
+      const unkeyedTasks = [];
+      for (const task of existingData.tasks) {
+        if (!task || task.id == null) {
+          unkeyedTasks.push(task);
+        } else if (!tombstones.has(String(task.id))) {
+          mergedById.set(String(task.id), task);
+        }
+      }
+      for (const task of incomingData.tasks) {
+        if (!task || task.id == null) {
+          unkeyedTasks.push(task);
+        } else if (!tombstones.has(String(task.id))) {
+          mergedById.set(String(task.id), task);
+        }
+      }
+      incomingData = {
+        ...existingData,
+        ...incomingData,
+        tasks: [...mergedById.values(), ...unkeyedTasks],
+        deletedTaskIds: [...tombstones]
+      };
+    }
+    const dataString = typeof data === 'string' && incomingData == null
+      ? data
+      : JSON.stringify(incomingData);
 
     // UPSERT into user_sync
     await context.env.DB.prepare(`
